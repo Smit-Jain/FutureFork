@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "futurefork"
+version = "0.1.0"
+description = "Simulate > Compare > Decide. Optimization and Monte Carlo scenario brancher."
+readme = "README.md"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests", "engine/tests"]
+python_files = ["test_*.py"]
+addopts = "-v"

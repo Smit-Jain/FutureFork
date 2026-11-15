@@ -1,0 +1,12 @@
+# Codeowners for FutureFork
+* @Smit-Jain
+
+# Role allocations:
+/frontend/       @Smit-Jain # Person A
+/backend/        @Smit-Jain # Person B
+/data/           @Smit-Jain # Person B
+/contracts/      @Smit-Jain # Shared (All)
+/engine/         @Smit-Jain # Person C
+/ai/             @Smit-Jain # Person D
+/scripts/        @Smit-Jain # Person B
+/docs/           @Smit-Jain # Person D & B

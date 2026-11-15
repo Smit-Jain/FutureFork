@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: futurefork-backend
+    runtime: docker
+    dockerfilePath: Dockerfile
+    plan: starter
+    region: oregon
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: 8000
+      - key: ENVIRONMENT
+        value: production
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: SOLVER_TIME_LIMIT_SECONDS
+        value: 8
+      - key: NUM_SIMULATION_RUNS
+        value: 300
+      - key: RANDOM_SEED
+        value: 42

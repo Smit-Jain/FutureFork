@@ -1,0 +1,454 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "FutureFork API",
+    "description": "Optimization and Monte Carlo Scenario Branching Engine for Resource Allocation.",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Health Check",
+        "operationId": "health_check_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ping": {
+      "get": {
+        "summary": "Keep Warm Ping",
+        "operationId": "keep_warm_ping_ping_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/datasets": {
+      "get": {
+        "summary": "List Datasets",
+        "operationId": "list_datasets_datasets_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/datasets/{dataset_id}": {
+      "get": {
+        "summary": "Get Dataset",
+        "operationId": "get_dataset_datasets__dataset_id__get",
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Dataset Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/decisions": {
+      "post": {
+        "summary": "Create Decision",
+        "operationId": "create_decision_decisions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/decisions/{decision_id}/scenarios": {
+      "post": {
+        "summary": "Generate Scenarios Endpoint",
+        "operationId": "generate_scenarios_endpoint_decisions__decision_id__scenarios_post",
+        "parameters": [
+          {
+            "name": "decision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Decision Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/decisions/{decision_id}/run": {
+      "post": {
+        "summary": "Start Run",
+        "operationId": "start_run_decisions__decision_id__run_post",
+        "parameters": [
+          {
+            "name": "decision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Decision Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{run_id}": {
+      "get": {
+        "summary": "Get Run Status",
+        "operationId": "get_run_status_runs__run_id__get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/scenarios/{scenario_id}/result": {
+      "get": {
+        "summary": "Get Scenario Result",
+        "operationId": "get_scenario_result_scenarios__scenario_id__result_get",
+        "parameters": [
+          {
+            "name": "scenario_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scenario Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/decisions/{decision_id}/compare": {
+      "get": {
+        "summary": "Get Decision Comparison",
+        "operationId": "get_decision_comparison_decisions__decision_id__compare_get",
+        "parameters": [
+          {
+            "name": "decision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Decision Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/scenarios/{parent_scenario_id}/branch": {
+      "post": {
+        "summary": "Branch Scenario Endpoint",
+        "operationId": "branch_scenario_endpoint_scenarios__parent_scenario_id__branch_post",
+        "parameters": [
+          {
+            "name": "parent_scenario_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Parent Scenario Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BranchScenarioRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "BranchScenarioRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Name for the new child scenario"
+          },
+          "change": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Change",
+            "description": "ChangeSpec payload"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "change"
+        ],
+        "title": "BranchScenarioRequest"
+      },
+      "CreateDecisionRequest": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text",
+            "description": "Plain-English decision prompt"
+          },
+          "dataset_id": {
+            "type": "string",
+            "title": "Dataset Id",
+            "description": "Dataset identifier"
+          }
+        },
+        "type": "object",
+        "required": [
+          "text",
+          "dataset_id"
+        ],
+        "title": "CreateDecisionRequest"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}
