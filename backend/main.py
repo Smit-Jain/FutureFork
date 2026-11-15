@@ -4,7 +4,15 @@ Team FutureLabs | Elite Coders CodeSprint 2026 | Person B
 """
 
 import os
+import sys
 import logging
+from pathlib import Path
+
+# Ensure project root is in sys.path so running `python backend/main.py` directly works
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -66,4 +74,9 @@ app.include_router(router)
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
-    uvicorn.run("backend.main:app", host="0.0.0.0", port=port, reload=True)
+    reload_env = os.getenv("RELOAD", "false").lower() in ("true", "1", "yes")
+    print(f"Starting FutureFork API server on http://0.0.0.0:{port} (docs at http://localhost:{port}/docs) ...", flush=True)
+    if reload_env:
+        uvicorn.run("backend.main:app", host="0.0.0.0", port=port, reload=True, app_dir=str(ROOT_DIR))
+    else:
+        uvicorn.run(app, host="0.0.0.0", port=port)
