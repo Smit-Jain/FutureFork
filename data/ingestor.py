@@ -12,12 +12,14 @@ a ColumnMapping into a validated FinancialProblemInstance:
 """
 
 from __future__ import annotations
+
 import io
 import re
 import sys
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Union, Tuple
+from typing import Any, Dict, List, Optional, Union
+
 import numpy as np
 import pandas as pd
 
@@ -525,7 +527,6 @@ class FinancialIngestor:
             if len(unique_cats) > 8:
                 # Top 7 categories preserved; long tail grouped into "Other / Discretionary"
                 top_7 = unique_cats[:7]
-                tail = set(unique_cats[7:])
                 df["_category_consolidated"] = df["_category"].apply(
                     lambda c: c if c in top_7 else "Other / Discretionary"
                 )

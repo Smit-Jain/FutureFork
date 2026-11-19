@@ -17,7 +17,7 @@ Generates seeded, reproducible synthetic college timetable data with:
 import json
 import random
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Any, Dict, List
 
 RANDOM_SEED = 42
 
@@ -157,7 +157,7 @@ def generate_sample_dataset() -> Dict[str, Any]:
 
     # Place events across the 40 slots (5 days x 8 slots)
     baseline_assignments = []
-    
+
     # Generate clean schedule grid
     grp_dayslots: Dict[str, set] = {g["group_id"]: set() for g in groups}
     fac_dayslots: Dict[str, set] = {f["faculty_id"]: set() for f in faculty}
@@ -177,7 +177,7 @@ def generate_sample_dataset() -> Dict[str, Any]:
                 if (dayslot not in grp_dayslots[ev["group_id"]] and
                     dayslot not in fac_dayslots[ev["faculty_id"]] and
                     dayslot not in room_dayslots[rm_id]):
-                    
+
                     grp_dayslots[ev["group_id"]].add(dayslot)
                     fac_dayslots[ev["faculty_id"]].add(dayslot)
                     room_dayslots[rm_id].add(dayslot)
@@ -218,7 +218,6 @@ def generate_sample_dataset() -> Dict[str, Any]:
             })
 
     # Clear all initial clashes by giving each uncollided distinct slots
-    slot_alloc = 0
     for idx, a in enumerate(baseline_assignments):
         a["day"] = idx % 5
         a["slot"] = (idx // 5) % 8
@@ -318,10 +317,10 @@ def generate_sample_dataset() -> Dict[str, Any]:
         used_slots.add((a["day"], a["slot"], a["group_id"]))
 
     remaining_indices = [i for i in range(len(baseline_assignments)) if i not in [0, 1, 2, 3, 8, 9] + [x for c in clash_defs for x in (c[0], c[1])]]
-    
+
     grid_cursor = 0
     all_grid_points = [(d, s) for d in range(5) for s in range(8)]
-    
+
     for rem_idx in remaining_indices:
         a = baseline_assignments[rem_idx]
         placed = False

@@ -3,9 +3,9 @@ FutureFork FastAPI Main Application
 Team FutureLabs | Elite Coders CodeSprint 2026 | Person B
 """
 
+import logging
 import os
 import sys
-import logging
 from pathlib import Path
 
 # Ensure project root is in sys.path so running `python backend/main.py` directly works
@@ -13,13 +13,14 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
-from backend.db.repository import init_db
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
 from backend.api.routes import router
+from backend.db.repository import init_db
 
 # Configure structured logging
 logging.basicConfig(

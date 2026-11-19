@@ -4,30 +4,30 @@ Member 2: OR-Tools CP-SAT Financial Solver (engine/solver)
 """
 
 import time
+
 import pytest
-from data.loader import load_fixture_json, load_sample_instance
+
+from data.loader import load_fixture_json
+from engine.changes import (
+    apply_discretionary_trim,
+    apply_emi_split,
+    apply_financial_change,
+    apply_phased_delay,
+    apply_upfront,
+)
 from engine.model import (
     ColumnMapping,
     FinancialProblemInstance,
     PurchaseGoal,
-    MonthlyCashSchedule,
     ScenarioEvaluationResult,
-)
-from engine.changes import (
-    apply_upfront,
-    apply_emi_split,
-    apply_phased_delay,
-    apply_discretionary_trim,
-    apply_financial_change,
 )
 from engine.solver import (
     evaluate_financial_baseline,
-    solve_upfront_branch,
+    solve_all_financial_scenarios,
     solve_emi_branch,
     solve_phased_branch,
     solve_trim_branch,
-    solve_financial_scenario,
-    solve_all_financial_scenarios,
+    solve_upfront_branch,
 )
 
 

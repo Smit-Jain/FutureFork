@@ -3,8 +3,10 @@ Backend Integration & Contract Unit Tests
 """
 
 import pytest
-from backend.db.repository import init_db, SessionLocal, Repository
+
 from backend.api import routes
+from backend.db.repository import SessionLocal, init_db
+
 
 @pytest.fixture(scope="module")
 def db_session():

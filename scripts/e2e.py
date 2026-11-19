@@ -4,17 +4,17 @@ Runs demo prompts and contract tests against the FastAPI backend.
 Supports both Direct Router Integration (instant, sandboxed) and Live HTTP URL testing.
 """
 
+import argparse
 import sys
 import time
-import argparse
 from pathlib import Path
 
 # Add project root to sys.path
 repo_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(repo_root))
 
-from backend.db.repository import init_db, SessionLocal
 from backend.api import routes
+from backend.db.repository import SessionLocal, init_db
 
 DEMO_PROMPTS = [
     "Move all afternoon classes to the morning, but keep every faculty member under 18 teaching hours per week.",

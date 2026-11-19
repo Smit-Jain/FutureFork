@@ -3,10 +3,9 @@ Unit tests for engine/metrics.py
 Verifies mathematical definitions of the four core metrics.
 """
 
-import pytest
-from engine.metrics import evaluate
-from engine.model import ProblemInstance
 from data.loader import default_loader
+from engine.metrics import evaluate
+
 
 def test_tiny_handcrafted_metrics():
     # Tiny test with 2 events:

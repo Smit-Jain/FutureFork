@@ -10,10 +10,11 @@ Provides clean, typed helper functions for the rest of the team:
 """
 
 from __future__ import annotations
+
 import json
 import sys
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 # Ensure repository root is in sys.path
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -21,9 +22,9 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from data.ingestor import (
-    FinancialProblemInstance,
-    FinancialIngestor,
     ColumnMapping,
+    FinancialIngestor,
+    FinancialProblemInstance,
 )
 
 DATA_DIR = Path(__file__).resolve().parent

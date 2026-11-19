@@ -3,21 +3,22 @@ FutureFork REST API Routes
 Implements the shared contract defined in contracts/schemas.py and section 5.
 """
 
-import uuid
 import logging
-from typing import List, Dict, Any, Optional
+import uuid
+from typing import Any, Dict
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from backend.db.session import get_db
 from backend.db.repository import Repository
-from backend.orchestration.runner import dispatch_decision_run
+from backend.db.session import get_db
 from backend.orchestration.integrations import (
-    call_parse_decision,
-    call_generate_scenarios,
     call_explain,
+    call_generate_scenarios,
+    call_parse_decision,
 )
+from backend.orchestration.runner import dispatch_decision_run
 
 logger = logging.getLogger("futurefork.api")
 

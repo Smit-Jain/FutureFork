@@ -7,10 +7,11 @@ The engine knows nothing about HTTP, databases, or LLMs.
 """
 
 from __future__ import annotations
-from dataclasses import dataclass, field, asdict
-from typing import List, Dict, Any, Optional, Union
-import numpy as np
 
+from dataclasses import asdict, dataclass, field
+from typing import Any, Dict, List, Optional
+
+import numpy as np
 
 # ==============================================================================
 # FINANCIAL DATA MODELS (FUTUREFORK 2.0 FINANCIAL ENGINE)

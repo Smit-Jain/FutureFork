@@ -12,17 +12,16 @@ Provides:
 """
 
 from __future__ import annotations
+
 import copy
-from typing import Dict, Any, List, Set, Optional, Union
+from typing import Any, Dict, List, Optional, Set
 
 from engine.model import (
     FinancialProblemInstance,
-    PurchaseGoal,
     ProblemInstance,
+    PurchaseGoal,
     Room,
-    Event,
 )
-
 
 # ==============================================================================
 # FINANCIAL BRANCH TRANSFORMERS (MEMBER 2)

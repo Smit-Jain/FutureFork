@@ -2,8 +2,8 @@
 Export OpenAPI JSON Schema
 """
 
-import sys
 import json
+import sys
 from pathlib import Path
 
 # Add project root to path
@@ -11,6 +11,7 @@ repo_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(repo_root))
 
 from backend.main import app
+
 
 def export_openapi():
     openapi_schema = app.openapi()

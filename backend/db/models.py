@@ -4,8 +4,11 @@ Stores flexible payloads as JSON/JSONB across SQLite and Supabase Postgres.
 """
 
 from datetime import datetime
-from sqlalchemy import Column, String, Integer, Float, DateTime, Text, JSON
+
+from sqlalchemy import JSON, Column, DateTime, Float, String, Text
+
 from backend.db.session import Base
+
 
 class DatasetModel(Base):
     __tablename__ = "datasets"

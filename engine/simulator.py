@@ -4,10 +4,13 @@ Simulates operational risk across 300 iterations using NumPy.
 Perturbs elective enrollments, session overruns (+10%), and room outages (+2%).
 """
 
+from typing import Any, Dict, List, Union
+
 import numpy as np
-from typing import Dict, Any, List, Union
-from engine.model import ProblemInstance, Assignment
+
 from engine.metrics import evaluate
+from engine.model import Assignment, ProblemInstance
+
 
 def run_simulation(
     timetable: List[Union[Assignment, Dict[str, Any]]],

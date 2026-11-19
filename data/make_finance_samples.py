@@ -10,13 +10,15 @@ Generates 3 realistic 12-month Indian financial CSVs + 1 pre-parsed JSON fixture
 """
 
 from __future__ import annotations
+
 import csv
 import json
 import random
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Dict, List
+
 import numpy as np
 
 # Ensure repository root is in sys.path
@@ -74,8 +76,6 @@ def generate_personal_upi_csv(output_path: Path, seed: int = 42) -> Path:
 
     rows: List[Dict[str, str]] = []
     current_balance = 150000.0  # Starting balance ₹1,50,000
-
-    start_date = datetime(2024, 4, 1)
 
     for month_idx in range(12):
         # Month anchor
@@ -666,7 +666,7 @@ def generate_institute_fixture_json(
     Compiles institute_erp_1.8cr.csv through FinancialIngestor into a
     serialized FinancialProblemInstance JSON fixture (Node 0 baseline).
     """
-    from data.ingestor import FinancialIngestor, ColumnMapping
+    from data.ingestor import ColumnMapping, FinancialIngestor
 
     mapping = ColumnMapping(
         date_col="Date",

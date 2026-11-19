@@ -3,9 +3,9 @@ Unit tests for engine/simulator.py
 Verifies vectorized Monte Carlo simulation.
 """
 
-import pytest
-from engine.simulator import run_simulation
 from data.loader import default_loader
+from engine.simulator import run_simulation
+
 
 def test_monte_carlo_simulation():
     data = default_loader.load_bundle()

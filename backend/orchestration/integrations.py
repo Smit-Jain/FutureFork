@@ -4,12 +4,8 @@ Bridges Backend (B) with Engine (C) and AI Layer (D).
 Attempts to call C's and D's modules when available; otherwise provides reference fallback execution.
 """
 
-import sys
-import os
-import json
-import random
-from typing import Dict, Any, List, Optional
-from data.loader import default_loader
+from typing import Any, Dict, List
+
 
 # Dynamic import helpers for C and D
 def call_parse_decision(text: str, dataset_summary: Dict[str, Any]) -> Dict[str, Any]:
@@ -219,7 +215,7 @@ def call_evaluate_scenario(
     is_baseline = (sc_id == "baseline" or scenario.get("parent_id") is None)
 
     try:
-        from engine.solver import evaluate_scenario, evaluate_baseline
+        from engine.solver import evaluate_baseline, evaluate_scenario
         if is_baseline:
             return evaluate_baseline(dataset, baseline_timetable, n_sims=n_sims, seed=seed)
         return evaluate_scenario(dataset, baseline_timetable, scenario["change"], n_sims=n_sims, seed=seed)

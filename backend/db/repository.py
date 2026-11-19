@@ -2,12 +2,21 @@
 Database Repository & Seeder
 """
 
-import json
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional
+
 from sqlalchemy.orm import Session
-from backend.db.session import engine, Base, SessionLocal
-from backend.db.models import DatasetModel, DecisionModel, ScenarioModel, RunModel, ResultModel, CacheModel
+
+from backend.db.models import (
+    CacheModel,
+    DatasetModel,
+    DecisionModel,
+    ResultModel,
+    RunModel,
+    ScenarioModel,
+)
+from backend.db.session import Base, SessionLocal, engine
 from data.loader import default_loader
+
 
 def init_db():
     Base.metadata.create_all(bind=engine)

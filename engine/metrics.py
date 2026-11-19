@@ -4,8 +4,10 @@ Exact mathematical definitions of the 4 core metrics as specified in Section 6.
 Every real number comes from this module and nowhere else.
 """
 
-from typing import List, Dict, Any, Union
+from typing import Any, Dict, List, Union
+
 from engine.model import Assignment, ProblemInstance
+
 
 def evaluate(
     timetable: List[Union[Assignment, Dict[str, Any]]],

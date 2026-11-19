@@ -4,12 +4,13 @@ Executes decision evaluation across all scenario branches asynchronously.
 Provides per-scenario status, caching, timeouts, and error isolation.
 """
 
-import time
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Dict, Any, List
-from backend.db.session import SessionLocal
+from typing import Any, Dict
+
 from backend.db.repository import Repository
+from backend.db.session import SessionLocal
 from backend.orchestration.caching import compute_cache_key
 from backend.orchestration.integrations import (
     call_evaluate_scenario,

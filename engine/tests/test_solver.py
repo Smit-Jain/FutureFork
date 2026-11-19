@@ -4,10 +4,13 @@ Verifies OR-Tools CP-SAT model and benchmark time constraints (<15s).
 """
 
 import time
+
 import pytest
-from engine.model import ProblemInstance
-from engine.solver import solve_scenario, evaluate_scenario, evaluate_baseline
+
 from data.loader import default_loader
+from engine.model import ProblemInstance
+from engine.solver import evaluate_baseline, evaluate_scenario
+
 
 @pytest.fixture
 def instance():

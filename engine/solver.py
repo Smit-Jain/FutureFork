@@ -17,29 +17,23 @@ Formulates exact CP-SAT integer programming constraints for 12-month cash flows:
 """
 
 from __future__ import annotations
+
 import time
-import math
-from typing import Dict, Any, List, Optional, Union, Tuple
-import numpy as np
+from typing import Any, Dict, List, Optional, Union
+
 from ortools.sat.python import cp_model
 
-from engine.model import (
-    FinancialProblemInstance,
-    PurchaseGoal,
-    MonthlyCashSchedule,
-    CategoryTrim,
-    ScenarioEvaluationResult,
-    ProblemInstance,
-    Assignment,
-)
 from engine.changes import (
-    apply_upfront,
-    apply_emi_split,
-    apply_phased_delay,
-    apply_discretionary_trim,
     apply_change,
 )
-
+from engine.model import (
+    Assignment,
+    FinancialProblemInstance,
+    MonthlyCashSchedule,
+    ProblemInstance,
+    PurchaseGoal,
+    ScenarioEvaluationResult,
+)
 
 # ==============================================================================
 # FINANCIAL CP-SAT CASH-FLOW SOLVER (MEMBER 2)

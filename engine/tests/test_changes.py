@@ -4,9 +4,11 @@ Verifies catalog change appliers and selection rules.
 """
 
 import pytest
-from engine.model import ProblemInstance
-from engine.changes import apply_change
+
 from data.loader import default_loader
+from engine.changes import apply_change
+from engine.model import ProblemInstance
+
 
 @pytest.fixture
 def instance():
