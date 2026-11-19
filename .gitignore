@@ -63,3 +63,6 @@ pnpm-debug.log*
 .env
 .env.local
 .env.*.local
+
+# Temporary scratch files
+scratch/
