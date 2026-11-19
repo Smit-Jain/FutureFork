@@ -20,4 +20,5 @@ ignore = ["E501", "E402"]
 [tool.pytest.ini_options]
 testpaths = ["backend/tests", "engine/tests"]
 python_files = ["test_*.py"]
+pythonpath = ["."]
 addopts = "-v"

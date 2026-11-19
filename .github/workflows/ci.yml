@@ -24,13 +24,14 @@ jobs:
           pip install pytest ruff
       - name: Run Ruff Lint
         run: |
-          ruff check backend/ contracts/ data/ scripts/
+          ruff check backend/ contracts/ data/ scripts/ engine/
       - name: Generate Sample Data
         run: |
           python data/make_sample.py
+          python data/make_finance_samples.py
       - name: Run Backend Tests
         run: |
-          pytest backend/tests/ -v
+          python -m pytest backend/tests/ engine/tests/ -v
 
   frontend-build:
     name: Frontend Lint & Build
