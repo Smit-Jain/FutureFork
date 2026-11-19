@@ -185,6 +185,13 @@ class FinancialProblemInstance:
         )
 
 
+# Alias to canonical engine.model definitions when available
+if _EngineColumnMapping is not None:
+    ColumnMapping = _EngineColumnMapping
+if _EngineFinancialProblemInstance is not None:
+    FinancialProblemInstance = _EngineFinancialProblemInstance
+
+
 def clean_currency_series(series: pd.Series) -> pd.Series:
     """
     Vectorized currency cleaner.

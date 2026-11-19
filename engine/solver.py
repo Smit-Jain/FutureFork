@@ -327,6 +327,7 @@ def solve_emi_branch(
     """
     Branch 2: EMI / Lease Financing.
     Finances capital cost over N months (default 6 or 12).
+    Uses CP-SAT to optimize start month s in [0, 12-N] to minimize floor breach and delay.
     Calculates exact monthly EMI, interest, and resulting cash curve.
     """
     start_t = time.perf_counter()
@@ -340,8 +341,64 @@ def solve_emi_branch(
     # Flat or simple interest over N months tenure
     interest_total = round(principal * r_annual * (N / 12.0), 2)
     monthly_emi = round((principal + interest_total) / N, 2)
+    down_int = int(round(down))
+    emi_int = int(round(monthly_emi))
 
-    start_m = max(0, min(T - N, goal.target_month))
+    target_m = max(0, min(T - N, goal.target_month))
+
+    # CP-SAT Model to optimize start month s in [0, 12 - N]
+    model = cp_model.CpModel()
+    max_s = T - N
+    s_vars = [model.NewBoolVar(f"start_m{s}") for s in range(max_s + 1)]
+    model.AddExactlyOne(s_vars)
+
+    inflows_int = [int(round(x)) for x in instance.inflows]
+    outflows_int = [int(round(x)) for x in instance.total_outflows]
+    F = int(round(goal.emergency_floor))
+    B0 = int(round(instance.starting_balance))
+
+    deficit_vars = []
+    prev_b = B0
+
+    for t in range(T):
+        b_t = model.NewIntVar(-10**12, 10**12, f"bal_emi_{t}")
+
+        # Outflow in month t depending on which start month s is chosen
+        month_purch_terms = []
+        for s in range(max_s + 1):
+            if t == s:
+                month_purch_terms.append(s_vars[s] * (down_int + emi_int))
+            elif s < t < s + N:
+                month_purch_terms.append(s_vars[s] * emi_int)
+
+        if month_purch_terms:
+            model.Add(b_t == prev_b + inflows_int[t] - outflows_int[t] - sum(month_purch_terms))
+        else:
+            model.Add(b_t == prev_b + inflows_int[t] - outflows_int[t])
+
+        def_t = model.NewIntVar(0, 10**12, f"def_emi_{t}")
+        model.Add(def_t >= F - b_t)
+        deficit_vars.append(def_t)
+
+        prev_b = b_t
+
+    # Objective: Minimize floor deficit primary, prefer target_m secondary
+    obj_terms = [d * 1000 for d in deficit_vars]
+    for s in range(max_s + 1):
+        obj_terms.append(s_vars[s] * abs(s - target_m) * 10)
+    model.Minimize(sum(obj_terms))
+
+    solver = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds = 0.5
+    solver.parameters.num_search_workers = 2
+    status = solver.Solve(model)
+
+    start_m = target_m
+    if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        for s in range(max_s + 1):
+            if solver.Value(s_vars[s]) == 1:
+                start_m = s
+                break
 
     schedules: List[MonthlyCashSchedule] = []
     curr_bal = instance.starting_balance
@@ -401,7 +458,7 @@ def solve_emi_branch(
         scenario_id="branch_emi",
         scenario_name=f"Fork B: {N}-Month EMI Financing",
         description=(
-            f"Finance across {N} months at {r_annual*100:.1f}% APR. "
+            f"Finance across {N} months at {r_annual*100:.1f}% APR starting in {instance.months[start_m]}. "
             f"Monthly EMI: ₹{monthly_emi:,.0f} (Total interest: ₹{interest_total:,.0f})."
         ),
         branch_type="emi",
@@ -414,12 +471,13 @@ def solve_emi_branch(
         category_trims={c: 0.0 for c in instance.categories},
         metrics=metrics,
         solver_metadata={
-            "status": "OPTIMAL",
+            "status": "OPTIMAL" if status == cp_model.OPTIMAL else "FEASIBLE",
             "runtime_s": round(elapsed, 4),
             "emi_months": N,
             "monthly_emi": monthly_emi,
             "total_interest": interest_total,
-            "solver": "Financial-Amortization-Engine",
+            "purchase_month": start_m,
+            "solver": "OR-Tools-CP-SAT-Financing-Amortization",
         },
     )
 
