@@ -16,7 +16,6 @@ Backward compat:
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
@@ -108,7 +107,6 @@ def parse_indian_amount(text: str) -> Optional[float]:
         Float value in rupees, or None if unparseable.
     """
     text = text.strip()
-    # Try match
     m = _INDIAN_AMOUNT_RE.search(text)
     if not m:
         return None
@@ -131,47 +129,50 @@ def parse_indian_amount(text: str) -> Optional[float]:
 
 
 # ===========================================================================
-# Regex / deterministic parser
+# Stricter amount regex — requires ₹/Rs prefix OR a multiplier suffix
+# This prevents matching bare numbers like "2 engineers" or "40 GPU PCs"
 # ===========================================================================
 
-# Patterns to find amounts anywhere in text.
-# Two alternatives:
-#   Alt 1: currency prefix (₹/Rs./INR) REQUIRED, multiplier suffix optional
-#   Alt 2: no currency prefix, but multiplier suffix REQUIRED (catches "60L", "1.8Cr", "30k")
-_AMOUNT_TOKENS_RE = re.compile(
+# Pattern 1: prefixed with ₹ or Rs (multiplier optional)
+_PREFIXED_AMOUNT_RE = re.compile(
     r"""
-    (?:
-        (?:₹|Rs\.?\s*|INR\s*)           # Alt 1: currency prefix required
-        ([\d,]+(?:\.\d+)?)              # number (group 1)
-        \s*
-        (Cr(?:ore)?s?|L(?:akh)?s?|Lac?s?|K)?  # optional multiplier (group 2)
-    )
-    |
-    (?:
-        ([\d,]+(?:\.\d+)?)              # number (group 3) — no prefix
-        \s*
-        (Cr(?:ore)?s?|L(?:akh)?s?|Lac?s?|K)   # REQUIRED multiplier (group 4)
-    )
+    (?:₹|Rs\.?\s*)                     # ₹ or Rs prefix REQUIRED
+    ([\d,]+(?:\.\d+)?)                 # number
+    \s*
+    (Cr(?:ore)?s?|L(?:akh)?s?|Lac?s?|K)?  # optional multiplier
     """,
     re.VERBOSE | re.IGNORECASE,
 )
 
-# Patterns for floor/reserve constraint
+# Pattern 2: no prefix but multiplier REQUIRED (e.g. "60L", "1.8 crore", "30k")
+_SUFFIXED_AMOUNT_RE = re.compile(
+    r"""
+    \b
+    ([\d,]+(?:\.\d+)?)                   # number
+    \s*
+    (Cr(?:ore)?s?|L(?:akh)?s?|K)        # multiplier REQUIRED (L(?:akh)?s? matches bare L)
+    \b
+    """,
+    re.VERBOSE | re.IGNORECASE,
+)
+
+# Floor / reserve constraint pattern
 _FLOOR_RE = re.compile(
     r"""
     (?:without\s+dropping\s+below|
        keep(?:ing)?\s+(?:at\s+least)?|
        maintain(?:ing)?\s+(?:a\s+)?|
-       emergency\s+(?:savings?|reserve?|fund)\s+of|
-       below|
+       emergency\s+(?:savings?|reserves?|funds?)\s+of|
+       dropping\s+below|
        minimum\s+(?:balance\s+of)?|
-       at\s+least
+       at\s+least|
+       reserve\s+of
     )
     \s+
-    (?:₹|Rs\.?\s*|INR\s*)?
+    (?:₹|Rs\.?\s*)?
     ([\d,]+(?:\.\d+)?)
     \s*
-    (Cr(?:ore)?s?|L(?:akh)?s?|Lac?s?|K)?
+    (Cr(?:ore)?s?|L(?:akh)?s?|K)?
     \b
     """,
     re.VERBOSE | re.IGNORECASE,
@@ -194,59 +195,38 @@ _FINANCING_KEYWORDS: Dict[str, str] = {
     "trim": "trim",
     "trimming": "trim",
     "cut": "trim",
-    "savings": "trim",
 }
 
-# Quantity extraction: "40 GPU lab PCs", "2 engineers", "10 servers"
-_QUANTITY_RE = re.compile(r"\b(\d+)\s+(?:[A-Za-z]+\s+){0,3}(?:pcs?|units?|sets?|servers?|engineers?|machines?|devices?|systems?|laptops?|computers?|monitors?|tablets?|nodes?|gpus?)\b", re.IGNORECASE)
+# Quantity pattern — "40 GPU lab PCs", "2 engineers"
+_QUANTITY_RE = re.compile(
+    r"\b(\d+)\s+(?:[A-Za-z]+\s+){0,3}"
+    r"(?:pcs?|units?|sets?|servers?|engineers?|machines?|devices?|systems?|"
+    r"laptops?|computers?|monitors?|tablets?|nodes?|gpus?|licences?|licenses?)\b",
+    re.IGNORECASE,
+)
 
 # EMI months pattern
-_EMI_MONTHS_RE = re.compile(r"\b(\d+)[- ]?months?\s+(?:emi|installment|instalment|loan)\b|\b(?:emi|installment|instalment|loan)\s+(?:of\s+)?(\d+)[- ]?months?\b|\b(\d+)[- ]?months?\b", re.IGNORECASE)
+_EMI_MONTHS_RE = re.compile(
+    r"\b(\d+)[- ]?months?\s+(?:emi|installment|instalment|loan)\b"
+    r"|\b(?:emi|installment|instalment|loan)\s+(?:of\s+)?(\d+)[- ]?months?\b",
+    re.IGNORECASE,
+)
 
-# Item label extraction heuristic — after "buy", "purchase", "acquire", etc.
+# Item label — after a purchase verb
 _ITEM_VERB_RE = re.compile(
     r"\b(?:buy|purchase|acquire|invest\s+in|hire|recruit|get|procure)\s+(?:a\s+|an\s+|the\s+)?",
     re.IGNORECASE,
 )
 
-_WHITELIST_NUMBERS = {300, 12, 4, 10, 50, 90}  # structural constants not to interpret as amounts
 
-
-def _extract_amounts_from_text(text: str) -> List[float]:
-    """Extract all amounts (in rupees) found in text, in order."""
-    results = []
-    for m in _AMOUNT_TOKENS_RE.finditer(text):
-        # Alt 1: groups 1,2 (with currency prefix)  Alt 2: groups 3,4 (suffix required)
-        num_str = (m.group(1) or m.group(3) or "").replace(",", "")
-        suffix = ((m.group(2) or m.group(4)) or "").lower()
-        if not num_str:
-            continue
-        try:
-            value = float(num_str)
-        except ValueError:
-            continue
-        multiplier = 1.0
-        for key, mult in _MULTIPLIERS.items():
-            if suffix.startswith(key):
-                multiplier = mult
-                break
-        final = value * multiplier
-        if final > 0:
-            results.append(final)
-    return results
-
-
-def _extract_floor(text: str) -> Optional[float]:
-    """Extract emergency floor amount from text."""
-    m = _FLOOR_RE.search(text)
-    if not m:
-        return None
-    num_str = m.group(1).replace(",", "")
-    suffix = (m.group(2) or "").lower()
+def _parse_amount_from_match(num_str: str, suffix: str) -> float:
+    """Convert parsed number string + suffix into rupees."""
+    num_str = num_str.replace(",", "")
+    suffix = (suffix or "").lower()
     try:
         value = float(num_str)
     except ValueError:
-        return None
+        return 0.0
     multiplier = 1.0
     for key, mult in _MULTIPLIERS.items():
         if suffix.startswith(key):
@@ -255,13 +235,46 @@ def _extract_floor(text: str) -> Optional[float]:
     return value * multiplier
 
 
+def _extract_all_amounts(text: str) -> List[tuple]:
+    """
+    Extract all amounts from text using strict patterns.
+    Returns list of (start_pos, end_pos, rupee_value).
+    """
+    results = []
+
+    # First pass: prefixed amounts (₹ / Rs)
+    for m in _PREFIXED_AMOUNT_RE.finditer(text):
+        val = _parse_amount_from_match(m.group(1), m.group(2) or "")
+        if val > 0:
+            results.append((m.start(), m.end(), val))
+
+    # Second pass: suffixed amounts (no prefix, multiplier required)
+    for m in _SUFFIXED_AMOUNT_RE.finditer(text):
+        # Skip if already captured by prefixed pattern (overlapping)
+        overlaps = any(s <= m.start() <= e for s, e, _ in results)
+        if not overlaps:
+            val = _parse_amount_from_match(m.group(1), m.group(2))
+            if val > 0:
+                results.append((m.start(), m.end(), val))
+
+    # Sort by position
+    results.sort(key=lambda x: x[0])
+    return results
+
+
+def _extract_floor(text: str) -> Optional[float]:
+    """Extract emergency floor amount from text."""
+    m = _FLOOR_RE.search(text)
+    if not m:
+        return None
+    return _parse_amount_from_match(m.group(1), m.group(2) or "")
+
+
 def _extract_item_label(text: str) -> str:
     """Extract the item/purchase description from the prompt."""
-    # Try to match after a purchase verb
     m = _ITEM_VERB_RE.search(text)
     if m:
         rest = text[m.end():].strip()
-        # Clip at "without", "for ₹", "for Rs", "on EMI", "upfront", sentence end
         clip = re.search(
             r"\s+(?:without|for\s+(?:₹|Rs)|on\s+emi|upfront|worth|at|,|\.)",
             rest,
@@ -270,11 +283,11 @@ def _extract_item_label(text: str) -> str:
         if clip:
             label = rest[: clip.start()].strip()
         else:
-            label = rest[:50].strip()
+            label = rest[:60].strip()
         return label or "Capital Purchase"
 
-    # Fallback: use first noun phrase before price
-    price_match = re.search(r"[₹]|Rs\.?|INR", text, re.IGNORECASE)
+    # Fallback: use text before first ₹
+    price_match = re.search(r"[₹]|Rs\.?", text, re.IGNORECASE)
     if price_match:
         before = text[: price_match.start()].strip().rstrip("for").strip()
         if before:
@@ -328,59 +341,43 @@ def _regex_parse(
     """
     defaulted: List[str] = []
 
-    # --- Quantities ---
-    quantity = _extract_quantity(prompt)
-
     # --- Floor ---
     floor = _extract_floor(prompt)
     if floor is None:
         floor = 0.0
         defaulted.append("emergency_floor")
 
-    # --- Cost ---
-    # Find floor match to exclude the floor amount from cost candidates.
-    # Strategy: any amount whose match starts AFTER the floor phrase begins is likely the floor.
+    # Find floor's position in text to avoid treating it as cost
     floor_match = _FLOOR_RE.search(prompt)
-    # floor_phrase_start: where "without dropping below" etc. begins
-    floor_phrase_start = floor_match.start() if floor_match else len(prompt) + 1
 
-    all_amounts = []
-    for m in _AMOUNT_TOKENS_RE.finditer(prompt):
-        num_str = (m.group(1) or m.group(3) or "").replace(",", "")
-        suffix = ((m.group(2) or m.group(4)) or "").lower()
-        if not num_str:
-            continue
-        try:
-            value = float(num_str)
-        except ValueError:
-            continue
-        multiplier = 1.0
-        for key, mult in _MULTIPLIERS.items():
-            if suffix.startswith(key):
-                multiplier = mult
-                break
-        final = value * multiplier
-        if final > 0:
-            all_amounts.append((m.start(), final))
+    # --- All amounts ---
+    all_amounts = _extract_all_amounts(prompt)
 
-    # Pick the first amount that appears BEFORE the floor phrase
+    # --- Cost: first amount that is NOT the floor ---
     total_cost = None
-    for pos, amt in all_amounts:
-        if pos >= floor_phrase_start:
-            continue  # this amount is part of the floor clause
-        total_cost = amt
+    for start, end, val in all_amounts:
+        # Skip if this overlaps with the floor match
+        if floor_match and not (end <= floor_match.start() or start >= floor_match.end()):
+            continue
+        # Skip if value equals floor (and we already have floor)
+        if floor_match and abs(val - floor) < 1.0:
+            continue
+        total_cost = val
+        break
 
-    # If nothing found before floor phrase (e.g. cost embedded in floor clause context),
-    # try any amount that differs from the floor value
-    if total_cost is None:
-        for pos, amt in all_amounts:
-            if abs(amt - floor) > 1.0:
-                total_cost = amt
+    if total_cost is None and floor is not None and floor > 0:
+        # Maybe the first amount IS cost and second is floor
+        for start, end, val in all_amounts:
+            if abs(val - floor) > 1.0:
+                total_cost = val
                 break
 
     if total_cost is None:
         total_cost = 0.0
         defaulted.append("total_cost")
+
+    # --- Quantity ---
+    quantity = _extract_quantity(prompt)
 
     # --- Item label ---
     item_label = _extract_item_label(prompt)
@@ -525,7 +522,11 @@ def parse_financial_decision(
 
     # Tier 2: Regex
     result = _regex_parse(prompt, baseline_balance, dataset_type)
-    logger.info("parser: used regex tier (cost=%.0f, floor=%.0f)", result.total_cost, result.emergency_floor)
+    logger.info(
+        "parser: used regex tier (cost=%.0f, floor=%.0f)",
+        result.total_cost,
+        result.emergency_floor,
+    )
 
     if result.total_cost == 0.0 and "total_cost" in result.defaulted_fields:
         raise DecisionParseError(
@@ -553,7 +554,6 @@ def parse_decision(text: str, dataset_summary: Dict[str, Any]) -> Dict[str, Any]
         stacklevel=2,
     )
 
-    # Try to interpret as a financial decision first
     lower = text.lower()
     is_financial = any(
         k in lower
@@ -585,7 +585,10 @@ def parse_decision(text: str, dataset_summary: Dict[str, Any]) -> Dict[str, Any]
         "dataset_id": dataset_summary.get("id", "sample_univ_v1"),
         "objectives": [{"metric": "student_clashes", "direction": "minimize"}],
         "constraints": [],
-        "change": {"type": "shift_time_window", "params": {"from": "afternoon", "to": "morning", "selection": "all"}},
+        "change": {
+            "type": "shift_time_window",
+            "params": {"from": "afternoon", "to": "morning", "selection": "all"},
+        },
         "status": "ok",
         "message": None,
     }
