@@ -1,4 +1,85 @@
 // Synced copy from contracts/types.ts
+
+// ─── Financial Types ───────────────────────────────────────────────────────
+
+export interface ColumnMapping {
+  date_col: string;
+  amount_col: string;
+  description_col: string;
+  category_col?: string;
+  balance_col?: string;
+  raw_columns: string[];
+  preview_rows: Record<string, string>[];
+}
+
+export interface InspectResponse {
+  dataset_id: string;
+  filename: string;
+  row_count: number;
+  column_mapping: ColumnMapping;
+  date_range: { start: string; end: string };
+  total_inflow: number;
+  total_outflow: number;
+  net_balance: number;
+}
+
+export interface CommitRequest {
+  dataset_id: string;
+  name: string;
+  column_mapping: ColumnMapping;
+  opening_balance: number;
+  emergency_floor: number;
+}
+
+export interface CommitResponse {
+  dataset_id: string;
+  name: string;
+  status: 'committed';
+  baseline_metrics: FinancialMetrics;
+}
+
+export interface FinancialMetrics {
+  cash_out_risk_pct: number;      // 0–100 probability of going below floor
+  p10_worst_balance: number;      // ₹ — 10th percentile worst balance
+  lowest_balance_month: string;   // e.g. "Aug 2025"
+  runway_months: number;          // months of positive balance remaining
+  survival_score_pct: number;     // 0–100 composite score
+}
+
+export interface FinancialSimulation {
+  per_metric: {
+    cash_out_risk_pct: { p10: number; p90: number; mean: number; std: number };
+    survival_score_pct: { p10: number; p90: number; mean: number; std: number };
+    runway_months: { p10: number; p90: number; mean: number; std: number };
+    p10_worst_balance: { p10: number; p90: number; mean: number; std: number };
+    [key: string]: { p10: number; p90: number; mean: number; std: number };
+  };
+  prob_cash_out: number;  // 0–1
+  monthly_balances: number[]; // 12 monthly balance snapshots
+  balance_p10: number[];      // 12-month P10 band
+  balance_p90: number[];      // 12-month P90 band
+}
+
+export interface CashFlowTimetable {
+  months: string[];  // e.g. ["Apr 25","May 25",...]
+  categories: {
+    name: string;
+    type: 'fixed' | 'flexible';
+    values: number[]; // ₹ per month, 12 values
+  }[];
+}
+
+export interface FinancialScenarioResult {
+  scenario_id: string;
+  solver: { status: 'OPTIMAL' | 'FEASIBLE' | 'INFEASIBLE'; objective: number; runtime_s: number };
+  metrics: FinancialMetrics;
+  simulation: FinancialSimulation;
+  timetable: CashFlowTimetable;
+  explanation: string | null;
+}
+
+// ─── Existing Timetable Types ──────────────────────────────────────────────
+
 export type MetricDirection = 'minimize' | 'maximize';
 
 export type MetricName =
@@ -14,7 +95,7 @@ export interface Objective {
 
 export interface Constraint {
   kind: string;
-  params: Record<string, any>;
+  params: Record<string, unknown>;
 }
 
 export type ChangeType = 'shift_time_window' | 'room_change' | 'faculty_load_cap';
@@ -40,7 +121,7 @@ export interface FacultyLoadCapParams {
 
 export interface ChangeSpec {
   type: ChangeType;
-  params: ShiftTimeWindowParams | RoomChangeParams | FacultyLoadCapParams | Record<string, any>;
+  params: ShiftTimeWindowParams | RoomChangeParams | FacultyLoadCapParams | Record<string, unknown>;
 }
 
 export type DecisionStatus = 'ok' | 'needs_clarification' | 'unsupported';
@@ -61,7 +142,7 @@ export type ScenarioStatus = 'queued' | 'running' | 'done' | 'failed';
 export interface Scenario {
   id: string;
   decision_id: string;
-  parent_id: string | null; // null = baseline root
+  parent_id: string | null;
   name: string;
   description: string;
   change: ChangeSpec;
@@ -77,9 +158,9 @@ export interface SolverInfo {
 export interface ScenarioMetrics {
   student_clashes: number;
   faculty_clashes: number;
-  room_utilization: number; // percentage (e.g. 78.5)
-  avg_student_gaps: number; // hours (e.g. 1.25)
-  capacity_fit?: number;    // secondary value percentage
+  room_utilization: number;
+  avg_student_gaps: number;
+  capacity_fit?: number;
 }
 
 export interface MetricDistribution {
@@ -98,7 +179,7 @@ export interface SimulationResult {
     avg_student_gaps: MetricDistribution;
     [key: string]: MetricDistribution;
   };
-  prob_zero_clashes: number; // probability between 0 and 1
+  prob_zero_clashes: number;
 }
 
 export interface TimetableAssignment {
@@ -107,8 +188,8 @@ export interface TimetableAssignment {
   faculty: string;
   group: string;
   room: string;
-  day: number;  // 0 = Mon, 1 = Tue, 2 = Wed, 3 = Thu, 4 = Fri
-  slot: number; // 0 to 7 (0-3 morning, 4-7 afternoon)
+  day: number;
+  slot: number;
   clash: boolean;
   clash_reasons?: string[];
 }
@@ -159,6 +240,14 @@ export interface DatasetSummary {
     days_count: number;
   };
   baseline_metrics: ScenarioMetrics;
+  financial_stats?: {
+    total_inflow: number;
+    total_outflow: number;
+    net_balance: number;
+    opening_balance: number;
+    emergency_floor: number;
+    months_of_data: number;
+  };
 }
 
 export interface ApiError {

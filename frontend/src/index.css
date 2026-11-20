@@ -4,35 +4,79 @@
 
 @layer base {
   body {
-    @apply bg-[#F8FAFC] text-slate-900;
-    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    @apply bg-[#090D16] text-slate-100;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11', 'tnum';
+  }
+
+  /* Tabular nums for all financial figures */
+  .font-mono,
+  [class*="tabular-nums"] {
+    font-feature-settings: 'tnum', 'cv02', 'cv03';
+    font-variant-numeric: tabular-nums;
   }
 }
 
-/* Custom scrollbars */
+@layer components {
+  /* Glassmorphism card base */
+  .glass-card {
+    @apply bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl;
+    background: linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.03) 100%);
+  }
+
+  .glass-card-hover {
+    @apply glass-card transition-all duration-200 hover:bg-white/8 hover:border-white/20 hover:shadow-glass;
+  }
+
+  /* Financial metric pills */
+  .metric-pill-emerald {
+    @apply bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 rounded-lg px-2 py-0.5 text-xs font-mono tabular-nums;
+  }
+  .metric-pill-amber {
+    @apply bg-amber-500/15 text-amber-400 border border-amber-500/30 rounded-lg px-2 py-0.5 text-xs font-mono tabular-nums;
+  }
+  .metric-pill-rose {
+    @apply bg-rose-500/15 text-rose-400 border border-rose-500/30 rounded-lg px-2 py-0.5 text-xs font-mono tabular-nums;
+  }
+  .metric-pill-cyan {
+    @apply bg-cyan-500/15 text-cyan-400 border border-cyan-500/30 rounded-lg px-2 py-0.5 text-xs font-mono tabular-nums;
+  }
+
+  /* Dark input */
+  .dark-input {
+    @apply bg-white/5 border border-white/10 rounded-xl text-slate-100 placeholder-slate-500
+           focus:outline-none focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/20
+           transition-all duration-200 px-4 py-2.5 text-sm;
+  }
+}
+
+/* Dark custom scrollbars */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 ::-webkit-scrollbar-track {
-  background: #f1f5f9;
+  background: rgba(255,255,255,0.03);
 }
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: rgba(255,255,255,0.12);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: rgba(255,255,255,0.22);
 }
 
-/* React Flow styling customisations */
+/* React Flow dark theme */
 .react-flow__attribution {
   display: none !important;
 }
 
+.react-flow__background {
+  background-color: #090D16 !important;
+}
+
 .react-flow__edge-path {
-  stroke: #94a3b8;
-  stroke-width: 2.5;
+  stroke: rgba(255,255,255,0.25);
+  stroke-width: 2;
 }
 
 .react-flow__edge.animated path {
@@ -40,11 +84,57 @@
   animation: dashdraw 0.6s linear infinite;
 }
 
-@keyframes dashdraw {
-  from {
-    stroke-dashoffset: 24;
-  }
-  to {
-    stroke-dashoffset: 0;
-  }
+.react-flow__controls {
+  background: rgba(255,255,255,0.05) !important;
+  border: 1px solid rgba(255,255,255,0.1) !important;
+  border-radius: 10px !important;
+  backdrop-filter: blur(12px);
+  overflow: hidden;
 }
+
+.react-flow__controls-button {
+  background: transparent !important;
+  border-bottom: 1px solid rgba(255,255,255,0.08) !important;
+  color: rgba(255,255,255,0.6) !important;
+}
+
+.react-flow__controls-button:hover {
+  background: rgba(255,255,255,0.08) !important;
+}
+
+.react-flow__minimap {
+  background: rgba(9,13,22,0.8) !important;
+  border: 1px solid rgba(255,255,255,0.1) !important;
+  border-radius: 10px !important;
+}
+
+@keyframes dashdraw {
+  from { stroke-dashoffset: 24; }
+  to { stroke-dashoffset: 0; }
+}
+
+/* Transition utilities */
+.animate-in {
+  animation: fadeIn 0.3s ease-out both;
+}
+
+.fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Financial grid pattern */
+.bg-grid-pattern {
+  background-image: linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+                    linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+/* Survival score border colors */
+.border-survival-high { border-color: #10B981; box-shadow: 0 0 12px rgba(16,185,129,0.25); }
+.border-survival-mid  { border-color: #F59E0B; box-shadow: 0 0 12px rgba(245,158,11,0.2); }
+.border-survival-low  { border-color: #F43F5E; box-shadow: 0 0 12px rgba(244,63,94,0.2); }

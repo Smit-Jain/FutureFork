@@ -6,6 +6,9 @@ import {
   RunStatus,
   ComparisonResponse,
   ChangeSpec,
+  InspectResponse,
+  CommitRequest,
+  CommitResponse,
 } from '../contracts/types';
 import {
   MOCK_DATASET,
@@ -13,6 +16,8 @@ import {
   MOCK_SCENARIOS,
   MOCK_RESULTS,
   MOCK_COMPARISON_RESPONSE,
+  MOCK_INSPECT_RESPONSE,
+  MOCK_FINANCIAL_RESULTS,
 } from '../mocks/fixtures';
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS !== 'false';
@@ -80,7 +85,6 @@ export const api = {
       await new Promise((r) => setTimeout(r, 600));
 
       const lower = text.toLowerCase();
-      // Handle unsupported / clarification edge cases for testing & demo
       if (lower.includes('crypto') || lower.includes('bitcoin') || lower.includes('weather') || lower.includes('salary')) {
         return {
           id: `dec_${Date.now()}`,
@@ -109,7 +113,6 @@ export const api = {
         };
       }
 
-      // Check if it's a room change prompt
       if (lower.includes('room 101') || lower.includes('remove room')) {
         return {
           id: `dec_${Date.now()}`,
@@ -129,7 +132,6 @@ export const api = {
         };
       }
 
-      // Check if it's faculty load cap
       if (lower.includes('faculty') && (lower.includes('cap') || lower.includes('hours') || lower.includes('15'))) {
         return {
           id: `dec_${Date.now()}`,
@@ -211,7 +213,6 @@ export const api = {
   async getRunStatus(runId: string): Promise<RunStatus> {
     if (USE_MOCKS) {
       if (!mockCurrentRun || mockCurrentRun.runId !== runId) {
-        // Return completed status if already finished
         return {
           run_id: runId,
           decision_id: 'dec_2026_01',
@@ -229,20 +230,15 @@ export const api = {
       const elapsed = Date.now() - mockCurrentRun.startTime;
       const scenarios = { ...mockCurrentRun.scenarios };
 
-      // Progressive simulation of evaluation
-      // Baseline finishes very fast (0.6s)
       if (elapsed > 600) scenarios.baseline = 'done';
       else scenarios.baseline = 'running';
 
-      // Scenario A starts running at 0.6s, completes at 2.4s
       if (elapsed > 2400) scenarios.scenario_a = 'done';
       else if (elapsed > 600) scenarios.scenario_a = 'running';
 
-      // Scenario B starts at 1.2s, completes at 3.6s
       if (elapsed > 3600) scenarios.scenario_b = 'done';
       else if (elapsed > 1200) scenarios.scenario_b = 'running';
 
-      // Scenario C completes at 4.6s
       if (elapsed > 4600) scenarios.scenario_c = 'done';
       else if (elapsed > 2000) scenarios.scenario_c = 'running';
 
@@ -250,12 +246,10 @@ export const api = {
       const doneCount = Object.values(scenarios).filter((s) => s === 'done').length;
       const progress = Math.min(100, Math.round((doneCount / Object.keys(scenarios).length) * 100));
 
-      const overall = allDone ? 'done' : 'running';
-
       return {
         run_id: runId,
         decision_id: mockCurrentRun.decisionId,
-        overall_status: overall,
+        overall_status: allDone ? 'done' : 'running',
         scenarios,
         progress_percent: progress,
       };
@@ -303,7 +297,6 @@ export const api = {
       };
       dynamicScenarios.push(newScenario);
 
-      // Synthesize realistic result for newly branched scenario
       dynamicResults[newId] = {
         scenario_id: newId,
         solver: { status: 'OPTIMAL', objective: 42.0, runtime_s: 3.1 },
@@ -337,6 +330,50 @@ export const api = {
       body: JSON.stringify({ name, change }),
     });
     if (!res.ok) throw new Error(`Failed to branch scenario: ${res.statusText}`);
+    return res.json();
+  },
+
+  // ─── New Financial API Functions ─────────────────────────────────────────
+
+  async inspectDataset(file: File): Promise<InspectResponse> {
+    if (USE_MOCKS) {
+      await new Promise((r) => setTimeout(r, 800));
+      return {
+        ...MOCK_INSPECT_RESPONSE,
+        filename: file.name,
+        dataset_id: `inspect_${Date.now()}`,
+      };
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const res = await fetch(`${API_BASE_URL}/datasets/inspect`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!res.ok) throw new Error(`Failed to inspect dataset: ${res.statusText}`);
+    return res.json();
+  },
+
+  async commitDataset(payload: CommitRequest): Promise<CommitResponse> {
+    if (USE_MOCKS) {
+      await new Promise((r) => setTimeout(r, 600));
+      const baseResult = MOCK_FINANCIAL_RESULTS[0];
+      return {
+        dataset_id: payload.dataset_id,
+        name: payload.name,
+        status: 'committed',
+        baseline_metrics: baseResult.metrics,
+      };
+    }
+
+    const res = await fetch(`${API_BASE_URL}/datasets/commit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(`Failed to commit dataset: ${res.statusText}`);
     return res.json();
   },
 };
