@@ -26,6 +26,9 @@ from ortools.sat.python import cp_model
 from engine.changes import (
     apply_change,
 )
+from engine.metrics import (
+    compute_financial_metrics,
+)
 from engine.model import (
     Assignment,
     FinancialProblemInstance,
@@ -47,51 +50,15 @@ def _compute_deterministic_metrics(
     total_interest: float,
     total_saved: float,
 ) -> Dict[str, Any]:
-    """Helper to compute deterministic risk, balance, and runway metrics."""
-    balances = [s.closing_balance for s in schedules]
-    inflows = [s.inflow for s in schedules]
-    total_outflows = [s.trimmed_outflow + s.purchase_cash_out for s in schedules]
-
-    min_bal = min(balances) if balances else 0.0
-    min_idx = balances.index(min_bal) if balances else 0
-    min_month = schedules[min_idx].month_str if schedules else "N/A"
-    months_below = sum(1 for b in balances if b < emergency_floor)
-    ending_balance = balances[-1] if balances else 0.0
-
-    sum_inflows = sum(inflows)
-    sum_outflows = sum(total_outflows)
-    avg_monthly_burn = (sum_outflows / 12.0) if sum_outflows > 0 else 1.0
-    runway_months = round(ending_balance / avg_monthly_burn, 1) if avg_monthly_burn > 0 else 99.9
-    if runway_months < 0:
-        runway_months = 0.0
-
-    # Survival score: 100% if never below floor; drops proportionally to deficit severity
-    if months_below == 0:
-        survival_score = 100.0
-    else:
-        worst_deficit = max(0.0, emergency_floor - min_bal)
-        penalty = min(80.0, (worst_deficit / max(1.0, emergency_floor)) * 50.0 + (months_below * 5.0))
-        survival_score = round(max(5.0, 100.0 - penalty), 1)
-
-    return {
-        "starting_balance": round(starting_balance, 2),
-        "ending_balance": round(ending_balance, 2),
-        "lowest_balance": round(min_bal, 2),
-        "lowest_balance_month": min_month,
-        "lowest_balance_month_idx": min_idx,
-        "emergency_floor": round(emergency_floor, 2),
-        "months_below_floor": months_below,
-        "is_safe_above_floor": (months_below == 0),
-        "total_inflow": round(sum_inflows, 2),
-        "total_outflow": round(sum_outflows, 2),
-        "net_cash_flow": round(sum_inflows - sum_outflows, 2),
-        "total_purchase_cost": round(total_purchase, 2),
-        "total_financing_interest": round(total_interest, 2),
-        "total_trims_saved": round(total_saved, 2),
-        "runway_months": runway_months,
-        "cash_out_risk_pct": 0.0 if min_bal >= 0 else round(min(100.0, (abs(min_bal) / max(1.0, sum_inflows)) * 100.0), 1),
-        "survival_score_pct": survival_score,
-    }
+    """Helper delegating to Member 3 engine.metrics.compute_financial_metrics."""
+    return compute_financial_metrics(
+        schedules=schedules,
+        starting_balance=starting_balance,
+        emergency_floor=emergency_floor,
+        total_purchase=total_purchase,
+        total_interest=total_interest,
+        total_saved=total_saved,
+    )
 
 
 def evaluate_financial_baseline(
@@ -871,6 +838,9 @@ def solve_financial_scenario(
 def solve_all_financial_scenarios(
     instance: FinancialProblemInstance,
     goal: Union[PurchaseGoal, Dict[str, Any]],
+    run_monte_carlo: bool = True,
+    n_sims: int = 300,
+    seed: int = 42,
 ) -> Dict[str, ScenarioEvaluationResult]:
     """
     Solves all 4 competing policy forks + baseline in under 800ms:
@@ -879,6 +849,7 @@ def solve_all_financial_scenarios(
     - emi: Fork B - 6-month installment financing with interest
     - phased: Fork C - 2-phase milestone delay (50/50, 0% interest)
     - trim: Fork D - Trim-and-buy with minimum-pain flexible cuts
+    Integrates Member 3 vectorized Monte Carlo simulation (300 runs).
     """
     start_all = time.perf_counter()
     g = goal if isinstance(goal, PurchaseGoal) else PurchaseGoal.from_dict(goal)
@@ -889,8 +860,23 @@ def solve_all_financial_scenarios(
     res_phased = solve_phased_branch(instance, g)
     res_trim = solve_trim_branch(instance, g)
 
+    all_branches = [res_baseline, res_upfront, res_emi, res_phased, res_trim]
+
+    if run_monte_carlo:
+        from engine.simulator import run_financial_monte_carlo
+        for r in all_branches:
+            sim = run_financial_monte_carlo(r, instance, n_runs=n_sims, seed=seed)
+            r.simulation_results = sim
+            r.metrics["cash_out_risk_pct"] = sim["cash_out_risk_pct"]
+            r.metrics["floor_breach_risk_pct"] = sim["floor_breach_risk_pct"]
+            r.metrics["p10_lowest_balance"] = sim["p10_lowest_balance"]
+            r.metrics["p50_lowest_balance"] = sim["p50_lowest_balance"]
+            r.metrics["p90_lowest_balance"] = sim["p90_lowest_balance"]
+            r.metrics["survival_score_pct"] = sim["survival_score_pct"]
+            r.metrics["simulation_runtime_ms"] = sim["runtime_ms"]
+
     total_time = time.perf_counter() - start_all
-    for r in [res_baseline, res_upfront, res_emi, res_phased, res_trim]:
+    for r in all_branches:
         r.solver_metadata["total_suite_runtime_s"] = round(total_time, 4)
 
     return {
