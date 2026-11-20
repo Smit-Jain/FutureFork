@@ -16,7 +16,7 @@ from engine.changes import (
 )
 
 # Simulation & Metrics
-from engine.metrics import evaluate
+from engine.metrics import compute_financial_metrics, evaluate
 from engine.model import (
     Assignment,
     CategoryTrim,
@@ -33,7 +33,7 @@ from engine.model import (
     Slot,
     StudentGroup,
 )
-from engine.simulator import run_simulation
+from engine.simulator import run_financial_monte_carlo, run_simulation
 
 # Financial & Timetable Solvers
 from engine.solver import (
@@ -72,6 +72,9 @@ __all__ = [
     "solve_emi_branch",
     "solve_phased_branch",
     "solve_trim_branch",
+    # Financial Simulation & Metrics (Member 3)
+    "compute_financial_metrics",
+    "run_financial_monte_carlo",
     # Timetable Backward Compatibility
     "Slot",
     "Room",
