@@ -1,205 +1,594 @@
 """
-FutureFork Parser Agent
-Translates plain-English decision prompts into validated DecisionSpec schemas.
-Grounds domain references using the target dataset summary.
+FutureFork Financial Decision Parser Agent (Member 4)
+
+Parses plain-English financial decision prompts into ParsedDecision objects.
+
+Tier 1: LLM — structured JSON extraction.
+Tier 2: Deterministic regex — always works offline.
+
+Public API:
+  parse_financial_decision(prompt, baseline=None, dataset_type="personal") -> ParsedDecision
+  parse_indian_amount(text: str) -> float | None
+
+Backward compat:
+  parse_decision(text, dataset_summary) -> dict  (old timetable stub)
 """
 
-import re
-import json
+from __future__ import annotations
+
 import logging
-from typing import Dict, Any, Optional
-from pydantic import BaseModel, Field
-from contracts.schemas import DecisionSpec, Objective, Constraint, ChangeSpec
-from ai.catalog import CATALOG, is_supported_change_type, get_catalog_summary_text
-from ai.llm import call_structured_llm
+import os
+import re
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Union
 
-PARSER_SYSTEM_PROMPT = f"""
-You are the FutureFork Decision Parser Agent.
-Your job is to translate human decision instructions into a structured DecisionSpec.
+logger = logging.getLogger("futurefork.ai.agents.parser")
 
-{get_catalog_summary_text()}
+# ===========================================================================
+# Public types
+# ===========================================================================
 
-Rules:
-1. Only emit change types supported in the catalog: 'shift_time_window', 'room_change', 'faculty_load_cap'.
-2. If the user asks for unsupported domains (stocks, crypto, weather, firing staff, budget), output status='unsupported' with a polite explanation.
-3. If the input is too vague (e.g. "make it better"), output status='needs_clarification'.
-4. Ground references using the provided dataset summary (e.g. "big hall" -> AUD301, "Room 101" -> R101).
-5. Output valid JSON matching the DecisionSpec schema.
+
+class DecisionParseError(Exception):
+    """Raised when a prompt truly cannot be parsed into a financial decision."""
+
+
+@dataclass
+class ParsedDecision:
+    """
+    Parsed financial purchase decision.
+
+    Attributes:
+        item_label:            Human-readable item name.
+        total_cost:            Total cost in rupees.
+        emergency_floor:       Minimum reserve floor in rupees.
+        quantity:              Number of units (or None).
+        target_month:          Intended month index 0-11.
+        financing_preference:  "auto"|"upfront"|"emi"|"phased"|"trim".
+        emi_months:            EMI duration in months.
+        dataset_type:          "personal"|"institute"|"startup".
+        raw_prompt:            Original input prompt.
+        defaulted_fields:      Fields that used baseline defaults.
+    """
+
+    item_label: str
+    total_cost: float
+    emergency_floor: float
+    quantity: Optional[int]
+    target_month: int
+    financing_preference: str
+    emi_months: int
+    dataset_type: str
+    raw_prompt: str
+    defaulted_fields: List[str] = field(default_factory=list)
+
+
+# ===========================================================================
+# Indian number parser
+# ===========================================================================
+
+# Multipliers for Indian shorthand
+_MULTIPLIERS: Dict[str, float] = {
+    "cr": 10_000_000.0,
+    "crore": 10_000_000.0,
+    "crores": 10_000_000.0,
+    "l": 100_000.0,
+    "lakh": 100_000.0,
+    "lakhs": 100_000.0,
+    "lac": 100_000.0,
+    "lacs": 100_000.0,
+    "k": 1_000.0,
+}
+
+# Regex for Indian-style numbers: ₹60L, Rs 1.2L, 1.8 crore, 30k, 60,00,000, ₹25L
+_INDIAN_AMOUNT_RE = re.compile(
+    r"""
+    (?:₹|Rs\.?\s*|INR\s*)?         # optional currency prefix
+    ([\d,]+(?:\.\d+)?)             # digits with optional commas and decimals
+    \s*
+    (Cr(?:ore)?s?|L(?:akh)?s?|K)?  # optional multiplier suffix (case-insensitive)
+    """,
+    re.VERBOSE | re.IGNORECASE,
+)
+
+
+def parse_indian_amount(text: str) -> Optional[float]:
+    """
+    Parse a single Indian-format amount string to rupees.
+
+    Handles:
+        ₹60L, ₹1.2L, 1.2 lakh, 1.8Cr, 1.8 crore, 30k, ₹30,000,
+        60,00,000 (Indian grouping), Rs 1.2L, ₹25L
+
+    Args:
+        text: Amount string such as "₹60L" or "1.8 crore".
+
+    Returns:
+        Float value in rupees, or None if unparseable.
+    """
+    text = text.strip()
+    m = _INDIAN_AMOUNT_RE.search(text)
+    if not m:
+        return None
+
+    num_str = m.group(1).replace(",", "")
+    suffix = (m.group(2) or "").lower().strip()
+
+    try:
+        value = float(num_str)
+    except ValueError:
+        return None
+
+    multiplier = 1.0
+    for key, mult in _MULTIPLIERS.items():
+        if suffix.startswith(key):
+            multiplier = mult
+            break
+
+    return value * multiplier
+
+
+# ===========================================================================
+# Stricter amount regex — requires ₹/Rs prefix OR a multiplier suffix
+# This prevents matching bare numbers like "2 engineers" or "40 GPU PCs"
+# ===========================================================================
+
+# Pattern 1: prefixed with ₹ or Rs (multiplier optional)
+_PREFIXED_AMOUNT_RE = re.compile(
+    r"""
+    (?:₹|Rs\.?\s*)                     # ₹ or Rs prefix REQUIRED
+    ([\d,]+(?:\.\d+)?)                 # number
+    \s*
+    (Cr(?:ore)?s?|L(?:akh)?s?|Lac?s?|K)?  # optional multiplier
+    """,
+    re.VERBOSE | re.IGNORECASE,
+)
+
+# Pattern 2: no prefix but multiplier REQUIRED (e.g. "60L", "1.8 crore", "30k")
+_SUFFIXED_AMOUNT_RE = re.compile(
+    r"""
+    \b
+    ([\d,]+(?:\.\d+)?)                   # number
+    \s*
+    (Cr(?:ore)?s?|L(?:akh)?s?|K)        # multiplier REQUIRED (L(?:akh)?s? matches bare L)
+    \b
+    """,
+    re.VERBOSE | re.IGNORECASE,
+)
+
+# Floor / reserve constraint pattern
+_FLOOR_RE = re.compile(
+    r"""
+    (?:without\s+dropping\s+below|
+       keep(?:ing)?\s+(?:at\s+least)?|
+       maintain(?:ing)?\s+(?:a\s+)?|
+       emergency\s+(?:savings?|reserves?|funds?)\s+of|
+       dropping\s+below|
+       minimum\s+(?:balance\s+of)?|
+       at\s+least|
+       reserve\s+of
+    )
+    \s+
+    (?:₹|Rs\.?\s*)?
+    ([\d,]+(?:\.\d+)?)
+    \s*
+    (Cr(?:ore)?s?|L(?:akh)?s?|K)?
+    \b
+    """,
+    re.VERBOSE | re.IGNORECASE,
+)
+
+# Financing preference keywords
+_FINANCING_KEYWORDS: Dict[str, str] = {
+    "upfront": "upfront",
+    "cash": "upfront",
+    "outright": "upfront",
+    "emi": "emi",
+    "installment": "emi",
+    "instalment": "emi",
+    "loan": "emi",
+    "lease": "emi",
+    "financed": "emi",
+    "phased": "phased",
+    "milestone": "phased",
+    "split": "phased",
+    "trim": "trim",
+    "trimming": "trim",
+    "cut": "trim",
+}
+
+# Quantity pattern — "40 GPU lab PCs", "2 engineers"
+_QUANTITY_RE = re.compile(
+    r"\b(\d+)\s+(?:[A-Za-z]+\s+){0,3}"
+    r"(?:pcs?|units?|sets?|servers?|engineers?|machines?|devices?|systems?|"
+    r"laptops?|computers?|monitors?|tablets?|nodes?|gpus?|licences?|licenses?)\b",
+    re.IGNORECASE,
+)
+
+# EMI months pattern
+_EMI_MONTHS_RE = re.compile(
+    r"\b(\d+)[- ]?months?\s+(?:emi|installment|instalment|loan)\b"
+    r"|\b(?:emi|installment|instalment|loan)\s+(?:of\s+)?(\d+)[- ]?months?\b",
+    re.IGNORECASE,
+)
+
+# Item label — after a purchase verb
+_ITEM_VERB_RE = re.compile(
+    r"\b(?:buy|purchase|acquire|invest\s+in|hire|recruit|get|procure)\s+(?:a\s+|an\s+|the\s+)?",
+    re.IGNORECASE,
+)
+
+
+def _parse_amount_from_match(num_str: str, suffix: str) -> float:
+    """Convert parsed number string + suffix into rupees."""
+    num_str = num_str.replace(",", "")
+    suffix = (suffix or "").lower()
+    try:
+        value = float(num_str)
+    except ValueError:
+        return 0.0
+    multiplier = 1.0
+    for key, mult in _MULTIPLIERS.items():
+        if suffix.startswith(key):
+            multiplier = mult
+            break
+    return value * multiplier
+
+
+def _extract_all_amounts(text: str) -> List[tuple]:
+    """
+    Extract all amounts from text using strict patterns.
+    Returns list of (start_pos, end_pos, rupee_value).
+    """
+    results = []
+
+    # First pass: prefixed amounts (₹ / Rs)
+    for m in _PREFIXED_AMOUNT_RE.finditer(text):
+        val = _parse_amount_from_match(m.group(1), m.group(2) or "")
+        if val > 0:
+            results.append((m.start(), m.end(), val))
+
+    # Second pass: suffixed amounts (no prefix, multiplier required)
+    for m in _SUFFIXED_AMOUNT_RE.finditer(text):
+        # Skip if already captured by prefixed pattern (overlapping)
+        overlaps = any(s <= m.start() <= e for s, e, _ in results)
+        if not overlaps:
+            val = _parse_amount_from_match(m.group(1), m.group(2))
+            if val > 0:
+                results.append((m.start(), m.end(), val))
+
+    # Sort by position
+    results.sort(key=lambda x: x[0])
+    return results
+
+
+def _extract_floor(text: str) -> Optional[float]:
+    """Extract emergency floor amount from text."""
+    m = _FLOOR_RE.search(text)
+    if not m:
+        return None
+    return _parse_amount_from_match(m.group(1), m.group(2) or "")
+
+
+def _extract_item_label(text: str) -> str:
+    """Extract the item/purchase description from the prompt."""
+    m = _ITEM_VERB_RE.search(text)
+    if m:
+        rest = text[m.end():].strip()
+        clip = re.search(
+            r"\s+(?:without|for\s+(?:₹|Rs)|on\s+emi|upfront|worth|at|,|\.)",
+            rest,
+            re.IGNORECASE,
+        )
+        if clip:
+            label = rest[: clip.start()].strip()
+        else:
+            label = rest[:60].strip()
+        return label or "Capital Purchase"
+
+    # Fallback: use text before first ₹
+    price_match = re.search(r"[₹]|Rs\.?", text, re.IGNORECASE)
+    if price_match:
+        before = text[: price_match.start()].strip().rstrip("for").strip()
+        if before:
+            return before[-60:].strip()
+
+    return "Capital Purchase"
+
+
+def _extract_quantity(text: str) -> Optional[int]:
+    """Extract item quantity from text."""
+    m = _QUANTITY_RE.search(text)
+    if m:
+        return int(m.group(1))
+    return None
+
+
+def _extract_financing(text: str) -> str:
+    """Detect financing preference from keywords."""
+    lower = text.lower()
+    for keyword, pref in _FINANCING_KEYWORDS.items():
+        if keyword in lower:
+            return pref
+    return "auto"
+
+
+def _extract_emi_months(text: str) -> int:
+    """Extract EMI duration in months."""
+    m = _EMI_MONTHS_RE.search(text)
+    if m:
+        for g in m.groups():
+            if g:
+                return int(g)
+    return 6
+
+
+def _regex_parse(
+    prompt: str,
+    baseline_starting_balance: float = 0.0,
+    dataset_type: str = "personal",
+) -> ParsedDecision:
+    """
+    Deterministic regex parser for financial decision prompts.
+
+    Args:
+        prompt:                    Plain-English prompt.
+        baseline_starting_balance: Starting balance for defaults.
+        dataset_type:              Dataset context.
+
+    Returns:
+        ParsedDecision (may have defaults for missing fields).
+    """
+    defaulted: List[str] = []
+
+    # --- Floor ---
+    floor = _extract_floor(prompt)
+    if floor is None:
+        floor = 0.0
+        defaulted.append("emergency_floor")
+
+    # Find floor's position in text to avoid treating it as cost
+    floor_match = _FLOOR_RE.search(prompt)
+
+    # --- All amounts ---
+    all_amounts = _extract_all_amounts(prompt)
+
+    # --- Cost: first amount that is NOT the floor ---
+    total_cost = None
+    for start, end, val in all_amounts:
+        # Skip if this overlaps with the floor match
+        if floor_match and not (end <= floor_match.start() or start >= floor_match.end()):
+            continue
+        # Skip if value equals floor (and we already have floor)
+        if floor_match and abs(val - floor) < 1.0:
+            continue
+        total_cost = val
+        break
+
+    if total_cost is None and floor is not None and floor > 0:
+        # Maybe the first amount IS cost and second is floor
+        for start, end, val in all_amounts:
+            if abs(val - floor) > 1.0:
+                total_cost = val
+                break
+
+    if total_cost is None:
+        total_cost = 0.0
+        defaulted.append("total_cost")
+
+    # --- Quantity ---
+    quantity = _extract_quantity(prompt)
+
+    # --- Item label ---
+    item_label = _extract_item_label(prompt)
+
+    # --- Financing ---
+    financing_preference = _extract_financing(prompt)
+
+    # --- EMI months ---
+    emi_months = _extract_emi_months(prompt) if financing_preference == "emi" else 6
+
+    return ParsedDecision(
+        item_label=item_label,
+        total_cost=total_cost,
+        emergency_floor=floor,
+        quantity=quantity,
+        target_month=0,
+        financing_preference=financing_preference,
+        emi_months=emi_months,
+        dataset_type=dataset_type,
+        raw_prompt=prompt,
+        defaulted_fields=defaulted,
+    )
+
+
+# ===========================================================================
+# LLM Tier
+# ===========================================================================
+
+_LLM_SYSTEM_PROMPT = """You are a financial decision parser for FutureFork.
+Parse the user's prompt into a structured JSON object with these fields:
+  item_label: string (what is being purchased/acquired)
+  quantity: integer or null
+  total_cost: float (in rupees, convert ₹60L → 6000000, ₹1.2L → 120000, 1.8Cr → 18000000, 30k → 30000)
+  emergency_floor: float (minimum reserve in rupees, convert similarly, 0.0 if not stated)
+  target_month: integer 0-11 (0 if immediate or not stated)
+  financing_preference: one of "auto","upfront","emi","phased","trim"
+  emi_months: integer (default 6, use stated value if given)
+  dataset_type: one of "personal","institute","startup"
+
+Output ONLY valid JSON. No explanation. All amounts must be in rupees (float).
 """
+
+
+def _llm_parse(
+    prompt: str,
+    dataset_type: str,
+) -> Optional[ParsedDecision]:
+    """
+    Try to parse the prompt using an LLM.
+
+    Returns:
+        ParsedDecision or None if LLM unavailable/fails.
+    """
+    offline = os.environ.get("FUTUREFORK_OFFLINE", "").strip() in ("1", "true", "yes")
+    if offline:
+        logger.debug("FUTUREFORK_OFFLINE=1: skipping LLM tier in parser.")
+        return None
+
+    try:
+        from pydantic import BaseModel
+        from ai.llm import call_structured_llm
+
+        class _ParseSchema(BaseModel):
+            item_label: str = "Capital Purchase"
+            quantity: Optional[int] = None
+            total_cost: float = 0.0
+            emergency_floor: float = 0.0
+            target_month: int = 0
+            financing_preference: str = "auto"
+            emi_months: int = 6
+            dataset_type: str = "personal"
+
+        result = call_structured_llm(
+            prompt=f"Dataset type: {dataset_type}\nPrompt: {prompt}",
+            system_prompt=_LLM_SYSTEM_PROMPT,
+            response_model=_ParseSchema,
+            fallback_generator=lambda: None,
+            max_retries=1,
+        )
+        if result is None:
+            return None
+
+        return ParsedDecision(
+            item_label=result.item_label or "Capital Purchase",
+            total_cost=float(result.total_cost or 0.0),
+            emergency_floor=float(result.emergency_floor or 0.0),
+            quantity=result.quantity,
+            target_month=int(result.target_month or 0),
+            financing_preference=result.financing_preference or "auto",
+            emi_months=int(result.emi_months or 6),
+            dataset_type=result.dataset_type or dataset_type,
+            raw_prompt=prompt,
+            defaulted_fields=[],
+        )
+    except Exception as exc:
+        logger.warning("LLM parse failed: %s", exc)
+        return None
+
+
+# ===========================================================================
+# Public API
+# ===========================================================================
+
+
+def parse_financial_decision(
+    prompt: str,
+    baseline: Any = None,  # Optional[FinancialProblemInstance]
+    dataset_type: str = "personal",
+) -> ParsedDecision:
+    """
+    Parse a plain-English financial decision prompt into a ParsedDecision.
+
+    Tier 1: LLM. Tier 2: Deterministic regex.
+    Raises DecisionParseError if truly unparseable.
+
+    Args:
+        prompt:       Plain-English prompt, e.g. "Buy a ₹1.2L laptop on EMI".
+        baseline:     Optional FinancialProblemInstance for context/defaults.
+        dataset_type: "personal" | "institute" | "startup".
+
+    Returns:
+        ParsedDecision
+
+    Raises:
+        DecisionParseError: If prompt is too vague or completely unparseable.
+    """
+    prompt = prompt.strip()
+    if not prompt:
+        raise DecisionParseError("Empty prompt provided.")
+
+    baseline_balance = 0.0
+    if baseline is not None:
+        baseline_balance = getattr(baseline, "starting_balance", 0.0)
+
+    # Tier 1: LLM
+    llm_result = _llm_parse(prompt, dataset_type)
+    if llm_result is not None and llm_result.total_cost > 0:
+        logger.info("parser: used LLM tier (cost=%.0f)", llm_result.total_cost)
+        return llm_result
+    if llm_result is not None:
+        logger.info("parser: LLM returned zero cost, falling back to regex")
+
+    # Tier 2: Regex
+    result = _regex_parse(prompt, baseline_balance, dataset_type)
+    logger.info(
+        "parser: used regex tier (cost=%.0f, floor=%.0f)",
+        result.total_cost,
+        result.emergency_floor,
+    )
+
+    if result.total_cost == 0.0 and "total_cost" in result.defaulted_fields:
+        raise DecisionParseError(
+            f"Could not parse a cost amount from prompt: '{prompt}'. "
+            "Please include an amount like ₹60L, ₹1.2 lakh, or ₹30,000."
+        )
+
+    return result
+
+
+# ===========================================================================
+# Backward compatibility stub (old timetable parser)
+# ===========================================================================
+
 
 def parse_decision(text: str, dataset_summary: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Parses decision text into a validated DecisionSpec dictionary.
-    Exposed function for Backend (B).
+    DEPRECATED stub kept for backward compatibility with old timetable routes.
+    The old parse_decision interface remains importable but emits a deprecation warning.
     """
-    cleaned_text = text.strip()
-    lower = cleaned_text.lower()
-    dataset_id = dataset_summary.get("id", "sample_univ_v1")
-    dec_id = f"dec_{abs(hash(cleaned_text)) % 1000000}"
+    import warnings
+    warnings.warn(
+        "parse_decision() is deprecated. Use parse_financial_decision() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
-    # 1. Unsupported Domain Gate
-    unsupported_keywords = [
-        "crypto", "bitcoin", "ethereum", "weather", "forecast", "salary",
-        "salaries", "bonus", "fire ", "terminate", "stock", "stocks", "diet", "recipe"
-    ]
-    if any(k in lower for k in unsupported_keywords):
-        return {
-            "id": dec_id,
-            "text": cleaned_text,
-            "dataset_id": dataset_id,
-            "objectives": [],
-            "constraints": [],
-            "change": {"type": "shift_time_window", "params": {}},
-            "status": "unsupported",
-            "message": (
-                "Unsupported decision domain. FutureFork MVP currently supports campus timetable and resource allocation "
-                "policies: shift_time_window, room_change, and faculty_load_cap."
-            ),
-        }
+    lower = text.lower()
+    is_financial = any(
+        k in lower
+        for k in ["₹", "rs ", "inr", "lakh", "crore", "buy", "purchase", "invest", "hire"]
+    )
 
-    # 2. Vague / Clarification Gate
-    if len(cleaned_text) < 15 or any(p in lower for p in ["make it better", "fix everything", "optimize all", "help me"]):
-        return {
-            "id": dec_id,
-            "text": cleaned_text,
-            "dataset_id": dataset_id,
-            "objectives": [],
-            "constraints": [],
-            "change": {"type": "shift_time_window", "params": {}},
-            "status": "needs_clarification",
-            "message": (
-                "Please specify which classes, rooms, or faculty limits to adjust "
-                '(e.g., "Move all afternoon classes to the morning" or "Remove Room 101").'
-            ),
-        }
-
-    # Fallback / Deterministic Rule Parser
-    def rule_based_parser() -> Dict[str, Any]:
-        # Policy A: Room Change (check room/auditorium/lab management first if room addition or closure is specified)
-        if (
-            ("room 101" in lower or "projector repair" in lower or "close auditorium" in lower or "add reserve" in lower)
-            or (any(w in lower for w in ["add", "remove", "close", "delete", "repair", "maintenance"]) and any(w in lower for w in ["room", "auditorium", "lab 20", "venue"]))
-            or (any(w in lower for w in ["room", "auditorium", "venue"]) and any(w in lower for w in ["remove", "close", "delete", "maintenance", "unavailable"]))
-        ):
-            action = "remove" if any(w in lower for w in ["remove", "close", "delete", "maintenance", "repair", "out of"]) else "add"
-            room_ids = ["R101"] if "101" in lower else ["AUD301"] if "auditorium" in lower or "301" in lower else ["LAB204"] if "204" in lower else ["R102"]
-
+    if is_financial:
+        try:
+            parsed = parse_financial_decision(text, dataset_type="personal")
             return {
-                "id": dec_id,
-                "text": cleaned_text,
-                "dataset_id": dataset_id,
-                "objectives": [
-                    {"metric": "student_clashes", "direction": "minimize"},
-                    {"metric": "room_utilization", "direction": "maximize"},
-                ],
-                "constraints": [],
-                "change": {
-                    "type": "room_change",
-                    "params": {"action": action, "room_ids": room_ids, "capacity": 50 if action == "add" else None},
-                },
+                "id": f"dec_{abs(hash(text)) % 1000000}",
+                "text": text,
+                "dataset_id": dataset_summary.get("id", "unknown"),
                 "status": "ok",
-                "message": None,
-            }
-
-        # Policy B: Shift Time Window (if prompt instructs moving/shifting between time windows)
-        if (
-            any(w in lower for w in ["move", "shift", "compress", "reschedule", "bring"])
-            and any(w in lower for w in ["morning", "afternoon", "slots", "slot", "early"])
-        ) or ("to morning" in lower or "to afternoon" in lower):
-            selection = "all"
-            if "elective" in lower:
-                selection = "electives"
-            elif "lab" in lower:
-                selection = "labs"
-            elif "lowest" in lower or "small" in lower:
-                selection = "lowest_enrollment_n"
-
-            from_win = "afternoon" if "morning" in lower else "morning"
-            to_win = "morning" if "morning" in lower else "afternoon"
-
-            constraints = []
-            cap_match = re.search(r"(\d+)\s*(?:hours|hrs|teaching hours)", lower)
-            if cap_match:
-                hours = int(cap_match.group(1))
-                constraints.append({"kind": "faculty_load_cap", "params": {"max_hours_per_week": hours}})
-
-            return {
-                "id": dec_id,
-                "text": cleaned_text,
-                "dataset_id": dataset_id,
-                "objectives": [
-                    {"metric": "student_clashes", "direction": "minimize"},
-                    {"metric": "faculty_clashes", "direction": "minimize"},
-                    {"metric": "room_utilization", "direction": "maximize"},
-                    {"metric": "avg_student_gaps", "direction": "minimize"},
-                ],
-                "constraints": constraints,
-                "change": {
-                    "type": "shift_time_window",
-                    "params": {"from": from_win, "to": to_win, "selection": selection},
+                "financial": {
+                    "item_label": parsed.item_label,
+                    "total_cost": parsed.total_cost,
+                    "emergency_floor": parsed.emergency_floor,
+                    "financing_preference": parsed.financing_preference,
                 },
-                "status": "ok",
-                "message": None,
             }
+        except DecisionParseError:
+            pass
 
-        # Policy C: Faculty Load Cap (professors / faculty contact hours)
-        if any(w in lower for w in ["faculty", "professor", "professors", "instructor", "instructors", "teacher", "teachers"]) and (
-            any(w in lower for w in ["cap", "limit", "restrict", "max", "contact hours", "teaching hours"])
-            or re.search(r"\b\d+\s*(?:hours|hrs)\b", lower)
-        ):
-            hours = 15
-            cap_match = re.search(r"(\d+)", lower)
-            if cap_match:
-                hours = int(cap_match.group(1))
-
-            return {
-                "id": dec_id,
-                "text": cleaned_text,
-                "dataset_id": dataset_id,
-                "objectives": [
-                    {"metric": "faculty_clashes", "direction": "minimize"},
-                    {"metric": "avg_student_gaps", "direction": "minimize"},
-                ],
-                "constraints": [
-                    {"kind": "faculty_load_cap", "params": {"max_hours_per_week": hours}}
-                ],
-                "change": {
-                    "type": "faculty_load_cap",
-                    "params": {"max_hours_per_week": hours},
-                },
-                "status": "ok",
-                "message": None,
-            }
-
-        # Generic default
-        return {
-            "id": dec_id,
-            "text": cleaned_text,
-            "dataset_id": dataset_id,
-            "objectives": [
-                {"metric": "student_clashes", "direction": "minimize"},
-                {"metric": "faculty_clashes", "direction": "minimize"},
-                {"metric": "room_utilization", "direction": "maximize"},
-            ],
-            "constraints": [],
-            "change": {
-                "type": "shift_time_window",
-                "params": {"from": "afternoon", "to": "morning", "selection": "all"},
-            },
-            "status": "ok",
-            "message": None,
-        }
-
-    # Run through structured LLM wrapper
-    prompt = f"Dataset: {json.dumps(dataset_summary)}\nUser Decision: {cleaned_text}"
-    try:
-        spec_model = call_structured_llm(
-            prompt=prompt,
-            system_prompt=PARSER_SYSTEM_PROMPT,
-            response_model=DecisionSpec,
-            fallback_generator=rule_based_parser,
-        )
-        return spec_model.model_dump()
-    except Exception as ex:
-        logger.warning(f"Falling back to rule-based parser: {ex}")
-        return rule_based_parser()
+    # Old timetable fallback
+    return {
+        "id": f"dec_{abs(hash(text)) % 1000000}",
+        "text": text,
+        "dataset_id": dataset_summary.get("id", "sample_univ_v1"),
+        "objectives": [{"metric": "student_clashes", "direction": "minimize"}],
+        "constraints": [],
+        "change": {
+            "type": "shift_time_window",
+            "params": {"from": "afternoon", "to": "morning", "selection": "all"},
+        },
+        "status": "ok",
+        "message": None,
+    }
