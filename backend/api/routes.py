@@ -434,6 +434,19 @@ def create_decision(req: CreateDecisionRequest, db: Session = Depends(get_db)):
     spec = call_parse_decision(req.text, summary)
     spec["dataset_id"] = req.dataset_id
 
+    # Normalise: Member 4's new parser returns "financial" key; map it to "change"
+    # so the rest of the pipeline (solver, scenarios, compare) always sees "change"
+    if "change" not in spec and "financial" in spec:
+        fin = spec["financial"]
+        spec["change"] = {
+            "type": fin.get("financing_preference", "big_purchase"),
+            "params": {
+                "total_cost": fin.get("total_cost", 0.0),
+                "emergency_floor": fin.get("emergency_floor", 0.0),
+                "item_label": fin.get("item_label", ""),
+            },
+        }
+
     repo.save_decision(spec)
     return spec
 

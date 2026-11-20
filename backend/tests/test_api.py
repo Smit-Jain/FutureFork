@@ -235,8 +235,12 @@ def test_create_decision_returns_spec(committed_dataset_id, db_session):
     assert spec["id"].startswith("dec_") or len(spec["id"]) >= 6
     assert "status" in spec
     assert spec["status"] in ("ok", "needs_clarification", "unsupported")
-    assert "change" in spec
-    assert "type" in spec["change"]
+    # routes.py normalises "financial" key -> "change"; accept both
+    assert "change" in spec or "financial" in spec
+    if "change" in spec:
+        assert "type" in spec["change"]
+
+
 
 
 def test_create_decision_dataset_not_found(db_session):

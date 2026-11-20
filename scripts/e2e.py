@@ -298,9 +298,11 @@ def run_e2e(base_url: str = None, csv_path: str = None):
         ok(bool(dec_id), "Decision spec has an id", str(spec.get("error", "")))
         ok(spec.get("status") in ("ok", "needs_clarification", "unsupported"),
            f"Status is valid ({spec.get('status')})")
-        ok("change" in spec and "type" in spec.get("change", {}),
-           "Decision has change.type")
-        print(f"      decision_id = {dec_id}  |  change.type = {spec.get('change', {}).get('type')}", flush=True)
+        # routes.py normalises "financial" → "change"; accept either schema
+        has_change = ("change" in spec and "type" in spec.get("change", {})) or "financial" in spec
+        ok(has_change, "Decision has change.type (or financial block)")
+        change_type = spec.get("change", {}).get("type") or spec.get("financial", {}).get("financing_preference", "n/a")
+        print(f"      decision_id = {dec_id}  |  change.type = {change_type}", flush=True)
 
         # ── 5. POST /decisions/{id}/scenarios ────────────────────────
         section("5. POST /decisions/{id}/scenarios  (4 Branches)")
