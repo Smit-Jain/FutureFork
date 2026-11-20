@@ -86,30 +86,31 @@ class ExplanationResult:
 
 def fmt_inr(amount: float) -> str:
     """
-    Format as ₹2,50,000 or ₹60L or ₹1.8Cr.
+    Format as ₹2,50,000 or ₹60L or ₹1.8Cr (with - prefix for negatives).
     Uses abbreviated form for large amounts, Indian grouping for smaller ones.
 
     Args:
-        amount: Amount in rupees.
+        amount: Amount in rupees (may be negative).
 
     Returns:
-        Formatted string such as "₹60L" or "₹2,50,000".
+        Formatted string such as "₹60L", "₹2,50,000", or "-₹3,21,558".
     """
-    if amount == 0.0:
+    sign = "-" if amount < 0 else ""
+    abs_amount = abs(amount)
+    if abs_amount == 0.0:
         return "₹0"
-    if amount >= 10_000_000:  # ≥ 1 Cr
-        cr = amount / 10_000_000
+    if abs_amount >= 10_000_000:  # ≥ 1 Cr
+        cr = abs_amount / 10_000_000
         if cr == int(cr):
-            return f"₹{int(cr)}Cr"
-        return f"₹{cr:.2f}Cr".rstrip("0").rstrip(".")
-    if amount >= 100_000:  # ≥ 1 L
-        lakh = amount / 100_000
+            return f"{sign}₹{int(cr)}Cr"
+        return f"{sign}₹{cr:.2f}Cr".rstrip("0").rstrip(".")
+    if abs_amount >= 100_000:  # ≥ 1 L
+        lakh = abs_amount / 100_000
         if lakh == int(lakh):
-            return f"₹{int(lakh)}L"
-        return f"₹{lakh:.2f}L".rstrip("0").rstrip(".")
-    # Indian grouping for < 1 lakh: XX,YYY
-    # e.g. 25000 → ₹25,000; 250000 would be ₹2,50,000
-    return "₹" + _indian_group(int(round(amount)))
+            return f"{sign}₹{int(lakh)}L"
+        return f"{sign}₹{lakh:.2f}L".rstrip("0").rstrip(".")
+    # Indian grouping for < 1 lakh
+    return f"{sign}₹" + _indian_group(int(round(abs_amount)))
 
 
 def _indian_group(n: int) -> str:
@@ -243,6 +244,10 @@ def _build_allowed_facts(
         if lb is not None:
             money_set.add(float(lb))
 
+    # Also add absolute values of all money amounts, since the template
+    # displays negative balances as positive (abs) values formatted with ₹.
+    money_set.update({abs(v) for v in list(money_set)})
+
     return money_set, percent_set, month_set
 
 
@@ -250,12 +255,15 @@ def _build_allowed_facts(
 # Numeric Guard
 # ===========================================================================
 
-# Money patterns
+# Money patterns - ordered so longer match (with suffix) wins via alternation priority.
+# Also matches -₹ prefix for negative balances.
 _MONEY_RE = re.compile(
     r"""
-    ₹\s*[\d,]+(?:\.\d+)?\s*(?:[Ll]akh?s?|[Cc]r(?:ore)?s?|[Kk])?  # ₹ prefix
+    -?₹\s*[\d,]+(?:\.\d+)?\s*(?:Cr(?:ore)?s?|L(?:akh)?s?|Lac?s?|K)  # -₹60L, ₹1.20L, ₹1.8Cr
     |
-    ₹\s*[\d.]+\s*[LlKkCcCr]+                                        # ₹60L etc.
+    -?₹\s*[\d,]+(?:\.\d+)?\s*(?:lakh|crore|lac)s?   # ₹1.2 lakh, ₹1.8 crore
+    |
+    -?₹\s*[\d,]+(?:\.\d+)?   # -₹25,000 or ₹120000 (plain number, no suffix)
     """,
     re.VERBOSE | re.IGNORECASE,
 )
@@ -290,11 +298,13 @@ _WHITELISTED_TOKENS = {
 
 
 def _parse_money_from_token(token: str) -> Optional[float]:
-    """Extract float rupee value from a ₹-prefixed token like '₹60L' or '₹2,50,000'."""
-    # Remove ₹ and spaces
-    s = re.sub(r"[₹\s]", "", token)
+    """Extract float rupee value from a ₹-prefixed token like '₹60L', '₹2,50,000', or '-₹3,21,558'."""
+    # Detect negative sign
+    negative = token.strip().startswith("-")
+    # Remove -, ₹ and spaces
+    s = re.sub(r"[-₹\s]", "", token)
     # Check for multiplier suffix
-    m = re.match(r"^([\d,]+(?:\.\d+)?)(L(?:akh)?|K|Cr(?:ore)?)?$", s, re.IGNORECASE)
+    m = re.match(r"^([\d,]+(?:\.\d+)?)(L(?:akh)?s?|K|Cr(?:ore)?s?)?$", s, re.IGNORECASE)
     if not m:
         return None
     num_str = m.group(1).replace(",", "")
@@ -307,8 +317,10 @@ def _parse_money_from_token(token: str) -> Optional[float]:
     from ai.agents.parser import _MULTIPLIERS
     for key, mult in _MULTIPLIERS.items():
         if suffix.startswith(key):
-            return value * mult
-    return value
+            value = value * mult
+            break
+
+    return -value if negative else value
 
 
 def _check_money_token(

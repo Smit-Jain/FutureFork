@@ -134,13 +134,24 @@ def parse_indian_amount(text: str) -> Optional[float]:
 # Regex / deterministic parser
 # ===========================================================================
 
-# Patterns to find amounts anywhere in text
+# Patterns to find amounts anywhere in text.
+# Two alternatives:
+#   Alt 1: currency prefix (₹/Rs./INR) REQUIRED, multiplier suffix optional
+#   Alt 2: no currency prefix, but multiplier suffix REQUIRED (catches "60L", "1.8Cr", "30k")
 _AMOUNT_TOKENS_RE = re.compile(
     r"""
-    (?:₹|Rs\.?\s*)?                              # optional currency prefix
-    ([\d,]+(?:\.\d+)?)                           # number
-    \s*
-    (Crore?s?|Lakh?s?|Lac?s?|K)?                # optional multiplier
+    (?:
+        (?:₹|Rs\.?\s*|INR\s*)           # Alt 1: currency prefix required
+        ([\d,]+(?:\.\d+)?)              # number (group 1)
+        \s*
+        (Cr(?:ore)?s?|L(?:akh)?s?|Lac?s?|K)?  # optional multiplier (group 2)
+    )
+    |
+    (?:
+        ([\d,]+(?:\.\d+)?)              # number (group 3) — no prefix
+        \s*
+        (Cr(?:ore)?s?|L(?:akh)?s?|Lac?s?|K)   # REQUIRED multiplier (group 4)
+    )
     """,
     re.VERBOSE | re.IGNORECASE,
 )
@@ -157,10 +168,10 @@ _FLOOR_RE = re.compile(
        at\s+least
     )
     \s+
-    (₹|Rs\.?\s*)?
+    (?:₹|Rs\.?\s*|INR\s*)?
     ([\d,]+(?:\.\d+)?)
     \s*
-    (Crore?s?|Lakh?s?|Lac?s?|K)?
+    (Cr(?:ore)?s?|L(?:akh)?s?|Lac?s?|K)?
     \b
     """,
     re.VERBOSE | re.IGNORECASE,
@@ -205,8 +216,11 @@ def _extract_amounts_from_text(text: str) -> List[float]:
     """Extract all amounts (in rupees) found in text, in order."""
     results = []
     for m in _AMOUNT_TOKENS_RE.finditer(text):
-        num_str = m.group(1).replace(",", "")
-        suffix = (m.group(2) or "").lower()
+        # Alt 1: groups 1,2 (with currency prefix)  Alt 2: groups 3,4 (suffix required)
+        num_str = (m.group(1) or m.group(3) or "").replace(",", "")
+        suffix = ((m.group(2) or m.group(4)) or "").lower()
+        if not num_str:
+            continue
         try:
             value = float(num_str)
         except ValueError:
@@ -227,8 +241,8 @@ def _extract_floor(text: str) -> Optional[float]:
     m = _FLOOR_RE.search(text)
     if not m:
         return None
-    num_str = m.group(2).replace(",", "")
-    suffix = (m.group(3) or "").lower()
+    num_str = m.group(1).replace(",", "")
+    suffix = (m.group(2) or "").lower()
     try:
         value = float(num_str)
     except ValueError:
@@ -324,15 +338,18 @@ def _regex_parse(
         defaulted.append("emergency_floor")
 
     # --- Cost ---
-    # Find floor match position to exclude floor amount from cost candidates
+    # Find floor match to exclude the floor amount from cost candidates.
+    # Strategy: any amount whose match starts AFTER the floor phrase begins is likely the floor.
     floor_match = _FLOOR_RE.search(prompt)
-    floor_pos = floor_match.start() if floor_match else len(prompt) + 1
+    # floor_phrase_start: where "without dropping below" etc. begins
+    floor_phrase_start = floor_match.start() if floor_match else len(prompt) + 1
 
     all_amounts = []
     for m in _AMOUNT_TOKENS_RE.finditer(prompt):
-        # Only consider amounts before floor section or not part of it
-        num_str = m.group(1).replace(",", "")
-        suffix = (m.group(2) or "").lower()
+        num_str = (m.group(1) or m.group(3) or "").replace(",", "")
+        suffix = ((m.group(2) or m.group(4)) or "").lower()
+        if not num_str:
+            continue
         try:
             value = float(num_str)
         except ValueError:
@@ -346,20 +363,18 @@ def _regex_parse(
         if final > 0:
             all_amounts.append((m.start(), final))
 
-    # Pick the first amount that isn't the floor
+    # Pick the first amount that appears BEFORE the floor phrase
     total_cost = None
     for pos, amt in all_amounts:
-        if floor_match and abs(pos - floor_match.start()) < 10:
-            continue  # likely the floor amount
-        if amt == floor and total_cost is not None:
-            continue  # duplicate of floor
+        if pos >= floor_phrase_start:
+            continue  # this amount is part of the floor clause
         total_cost = amt
-        break
 
+    # If nothing found before floor phrase (e.g. cost embedded in floor clause context),
+    # try any amount that differs from the floor value
     if total_cost is None:
-        # Try non-floor amounts
         for pos, amt in all_amounts:
-            if amt != floor:
+            if abs(amt - floor) > 1.0:
                 total_cost = amt
                 break
 
