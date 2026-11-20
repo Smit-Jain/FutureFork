@@ -2,20 +2,27 @@
   "openapi": "3.1.0",
   "info": {
     "title": "FutureFork API",
-    "description": "Optimization and Monte Carlo Scenario Branching Engine for Resource Allocation.",
-    "version": "0.1.0"
+    "description": "Drop Your CSV, Fork Your Financial Future — CP-SAT + Monte Carlo financial scenario engine.",
+    "version": "2.0.0"
   },
   "paths": {
     "/health": {
       "get": {
         "summary": "Health Check",
-        "operationId": "health_check_health_get",
+        "operationId": "health_check",
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "Service liveness",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status":  { "type": "string", "example": "ok" },
+                    "service": { "type": "string" },
+                    "engine":  { "type": "string" }
+                  }
+                }
               }
             }
           }
@@ -24,30 +31,23 @@
     },
     "/ping": {
       "get": {
-        "summary": "Keep Warm Ping",
-        "operationId": "keep_warm_ping_ping_get",
+        "summary": "Keep-Warm Ping",
+        "operationId": "keep_warm_ping",
         "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
+          "200": { "description": "Pong", "content": { "application/json": { "schema": {} } } }
         }
       }
     },
     "/datasets": {
       "get": {
-        "summary": "List Datasets",
-        "operationId": "list_datasets_datasets_get",
+        "summary": "List committed datasets",
+        "operationId": "list_datasets",
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "Array of dataset summaries",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/DatasetSummary" } }
               }
             }
           }
@@ -56,398 +56,316 @@
     },
     "/datasets/{dataset_id}": {
       "get": {
-        "summary": "Get Dataset",
-        "operationId": "get_dataset_datasets__dataset_id__get",
+        "summary": "Get dataset Node-0 baseline",
+        "operationId": "get_dataset",
         "parameters": [
-          {
-            "name": "dataset_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Dataset Id"
-            }
-          }
+          { "name": "dataset_id", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
         "responses": {
+          "200": { "description": "Dataset summary", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DatasetSummary" } } } },
+          "404": { "description": "Dataset not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } }
+        }
+      }
+    },
+    "/datasets/inspect": {
+      "post": {
+        "summary": "Upload CSV → get proposed ColumnMapping + 5-row preview",
+        "operationId": "inspect_dataset",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": { "type": "string", "format": "binary", "description": "Financial CSV file (bank/UPI/ERP/P&L)" }
+                },
+                "required": ["file"]
+              }
+            }
+          }
+        },
+        "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "Inspection result with upload_id cached for 15 minutes",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": { "$ref": "#/components/schemas/InspectResponse" }
               }
             }
           },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
+          "400": { "description": "Empty or unreadable CSV", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } }
+        }
+      }
+    },
+    "/datasets/commit": {
+      "post": {
+        "summary": "Confirm mapping → ingest CSV → save Node 0 baseline",
+        "operationId": "commit_dataset",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CommitRequest" }
             }
           }
+        },
+        "responses": {
+          "201": {
+            "description": "Dataset committed; Node 0 baseline evaluated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CommitResponse" }
+              }
+            }
+          },
+          "404": { "description": "upload_id not found or expired", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } },
+          "422": { "description": "CSV compilation failed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } }
         }
       }
     },
     "/decisions": {
       "post": {
-        "summary": "Create Decision",
-        "operationId": "create_decision_decisions_post",
+        "summary": "Parse financial decision prompt → 4 policy fork specs",
+        "operationId": "create_decision",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateDecisionRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
+              "schema": { "$ref": "#/components/schemas/CreateDecisionRequest" }
             }
           }
+        },
+        "responses": {
+          "201": { "description": "DecisionSpec with 4 competing policy forks", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DecisionSpec" } } } },
+          "404": { "description": "Dataset not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } }
         }
       }
     },
     "/decisions/{decision_id}/scenarios": {
       "post": {
-        "summary": "Generate Scenarios Endpoint",
-        "operationId": "generate_scenarios_endpoint_decisions__decision_id__scenarios_post",
+        "summary": "Generate 4 competing scenario branches for a decision",
+        "operationId": "generate_scenarios",
         "parameters": [
-          {
-            "name": "decision_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Decision Id"
-            }
-          }
+          { "name": "decision_id", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
         "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
+          "200": { "description": "List of scenarios (baseline + 4 policy forks)", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Scenario" } } } } },
+          "404": { "description": "Decision not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } }
         }
       }
     },
     "/decisions/{decision_id}/run": {
       "post": {
-        "summary": "Start Run",
-        "operationId": "start_run_decisions__decision_id__run_post",
+        "summary": "Run CP-SAT solver + Monte Carlo simulation on all branches",
+        "operationId": "start_run",
         "parameters": [
-          {
-            "name": "decision_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Decision Id"
-            }
-          }
+          { "name": "decision_id", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
         "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/runs/{run_id}": {
-      "get": {
-        "summary": "Get Run Status",
-        "operationId": "get_run_status_runs__run_id__get",
-        "parameters": [
-          {
-            "name": "run_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Run Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/scenarios/{scenario_id}/result": {
-      "get": {
-        "summary": "Get Scenario Result",
-        "operationId": "get_scenario_result_scenarios__scenario_id__result_get",
-        "parameters": [
-          {
-            "name": "scenario_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Scenario Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
+          "200": { "description": "Run dispatched", "content": { "application/json": { "schema": { "type": "object", "properties": { "run_id": { "type": "string" } } } } } },
+          "404": { "description": "Decision not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } }
         }
       }
     },
     "/decisions/{decision_id}/compare": {
       "get": {
-        "summary": "Get Decision Comparison",
-        "operationId": "get_decision_comparison_decisions__decision_id__compare_get",
+        "summary": "Side-by-side comparison of 4 branches + AI explanation (Regex Numeric Guard verified)",
+        "operationId": "get_comparison",
         "parameters": [
-          {
-            "name": "decision_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Decision Id"
-            }
-          }
+          { "name": "decision_id", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
         "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
+          "200": { "description": "Comparison payload with AI recommendation", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ComparisonResponse" } } } },
+          "404": { "description": "Decision not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } }
+        }
+      }
+    },
+    "/runs/{run_id}": {
+      "get": {
+        "summary": "Poll run status",
+        "operationId": "get_run_status",
+        "parameters": [
+          { "name": "run_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Run status", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RunStatus" } } } },
+          "404": { "description": "Run not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } }
+        }
+      }
+    },
+    "/scenarios/{scenario_id}/result": {
+      "get": {
+        "summary": "Fetch single branch result (solver + Monte Carlo metrics)",
+        "operationId": "get_scenario_result",
+        "parameters": [
+          { "name": "scenario_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Scenario evaluation result", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ScenarioResult" } } } },
+          "404": { "description": "Result not found or not yet ready", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } }
         }
       }
     },
     "/scenarios/{parent_scenario_id}/branch": {
       "post": {
-        "summary": "Branch Scenario Endpoint",
-        "operationId": "branch_scenario_endpoint_scenarios__parent_scenario_id__branch_post",
+        "summary": "Phase-2: Create a user-defined child scenario branch",
+        "operationId": "branch_scenario",
         "parameters": [
-          {
-            "name": "parent_scenario_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Parent Scenario Id"
-            }
-          }
+          { "name": "parent_scenario_id", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/BranchScenarioRequest"
-              }
+              "schema": { "$ref": "#/components/schemas/BranchScenarioRequest" }
             }
           }
         },
         "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
+          "201": { "description": "Child scenario created and evaluated", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Scenario" } } } },
+          "404": { "description": "Parent scenario not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } } }
         }
       }
     }
   },
   "components": {
     "schemas": {
-      "BranchScenarioRequest": {
-        "properties": {
-          "name": {
-            "type": "string",
-            "title": "Name",
-            "description": "Name for the new child scenario"
-          },
-          "change": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Change",
-            "description": "ChangeSpec payload"
-          }
-        },
+      "ApiError": {
         "type": "object",
-        "required": [
-          "name",
-          "change"
-        ],
-        "title": "BranchScenarioRequest"
+        "properties": {
+          "error":   { "type": "string" },
+          "message": { "type": "string" }
+        }
+      },
+      "ColumnMapping": {
+        "type": "object",
+        "description": "Column header mapping for financial CSV parsing",
+        "properties": {
+          "date_col":        { "type": "string" },
+          "amount_col":      { "type": "string", "nullable": true },
+          "debit_col":       { "type": "string", "nullable": true },
+          "credit_col":      { "type": "string", "nullable": true },
+          "category_col":    { "type": "string", "nullable": true },
+          "description_col": { "type": "string", "nullable": true },
+          "type_col":        { "type": "string", "nullable": true },
+          "date_format":     { "type": "string", "nullable": true },
+          "starting_balance":{ "type": "number", "default": 0.0 }
+        }
+      },
+      "InspectResponse": {
+        "type": "object",
+        "properties": {
+          "upload_id":        { "type": "string", "description": "15-min TTL cache key" },
+          "filename":         { "type": "string" },
+          "proposed_mapping": { "$ref": "#/components/schemas/ColumnMapping" },
+          "preview_rows":     { "type": "array", "items": { "type": "object" }, "maxItems": 5 },
+          "ttl_seconds":      { "type": "integer", "example": 900 },
+          "message":          { "type": "string" }
+        }
+      },
+      "CommitRequest": {
+        "type": "object",
+        "required": ["upload_id", "confirmed_mapping"],
+        "properties": {
+          "upload_id":          { "type": "string" },
+          "confirmed_mapping":  { "$ref": "#/components/schemas/ColumnMapping" },
+          "dataset_name":       { "type": "string", "nullable": true },
+          "starting_balance":   { "type": "number", "nullable": true, "description": "Override starting ₹ balance" }
+        }
+      },
+      "CommitResponse": {
+        "type": "object",
+        "properties": {
+          "dataset_id":       { "type": "string" },
+          "name":             { "type": "string" },
+          "stats":            { "type": "object" },
+          "baseline_metrics": { "type": "object" },
+          "baseline_risks":   { "type": "object" },
+          "message":          { "type": "string" }
+        }
+      },
+      "DatasetSummary": {
+        "type": "object",
+        "properties": {
+          "id":               { "type": "string" },
+          "name":             { "type": "string" },
+          "description":      { "type": "string" },
+          "stats":            { "type": "object" },
+          "baseline_metrics": { "type": "object" }
+        }
       },
       "CreateDecisionRequest": {
-        "properties": {
-          "text": {
-            "type": "string",
-            "title": "Text",
-            "description": "Plain-English decision prompt"
-          },
-          "dataset_id": {
-            "type": "string",
-            "title": "Dataset Id",
-            "description": "Dataset identifier"
-          }
-        },
         "type": "object",
-        "required": [
-          "text",
-          "dataset_id"
-        ],
-        "title": "CreateDecisionRequest"
+        "required": ["text", "dataset_id"],
+        "properties": {
+          "text":       { "type": "string", "description": "Plain-English financial decision prompt" },
+          "dataset_id": { "type": "string" }
+        }
       },
-      "HTTPValidationError": {
-        "properties": {
-          "detail": {
-            "items": {
-              "$ref": "#/components/schemas/ValidationError"
-            },
-            "type": "array",
-            "title": "Detail"
-          }
-        },
+      "DecisionSpec": {
         "type": "object",
-        "title": "HTTPValidationError"
+        "properties": {
+          "id":         { "type": "string" },
+          "text":       { "type": "string" },
+          "dataset_id": { "type": "string" },
+          "objectives": { "type": "array", "items": { "type": "object" } },
+          "constraints":{ "type": "array", "items": { "type": "object" } },
+          "change":     { "type": "object", "properties": { "type": { "type": "string" }, "params": { "type": "object" } } },
+          "status":     { "type": "string", "enum": ["ok", "needs_clarification", "unsupported"] },
+          "message":    { "type": "string", "nullable": true }
+        }
       },
-      "ValidationError": {
-        "properties": {
-          "loc": {
-            "items": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "integer"
-                }
-              ]
-            },
-            "type": "array",
-            "title": "Location"
-          },
-          "msg": {
-            "type": "string",
-            "title": "Message"
-          },
-          "type": {
-            "type": "string",
-            "title": "Error Type"
-          }
-        },
+      "Scenario": {
         "type": "object",
-        "required": [
-          "loc",
-          "msg",
-          "type"
-        ],
-        "title": "ValidationError"
+        "properties": {
+          "id":          { "type": "string" },
+          "decision_id": { "type": "string" },
+          "parent_id":   { "type": "string", "nullable": true },
+          "name":        { "type": "string" },
+          "description": { "type": "string" },
+          "change":      { "type": "object" },
+          "status":      { "type": "string", "enum": ["queued", "running", "done", "failed"] }
+        }
+      },
+      "RunStatus": {
+        "type": "object",
+        "properties": {
+          "run_id":           { "type": "string" },
+          "decision_id":      { "type": "string" },
+          "overall_status":   { "type": "string", "enum": ["queued", "running", "done", "failed"] },
+          "progress_percent": { "type": "number" },
+          "scenarios":        { "type": "object", "description": "Dict[scenario_id → status]" }
+        }
+      },
+      "ScenarioResult": {
+        "type": "object",
+        "properties": {
+          "scenario_id": { "type": "string" },
+          "solver":      { "type": "object", "properties": { "status": { "type": "string" }, "objective": { "type": "number" }, "runtime_s": { "type": "number" } } },
+          "metrics":     { "type": "object", "description": "Financial risk metrics: cash_out_risk_pct, p10_lowest_balance, runway_months, survival_score_pct" },
+          "simulation":  { "type": "object", "description": "Monte Carlo 300-run results" },
+          "timetable":   { "type": "array", "items": { "type": "object" }, "description": "12-month cash schedule" },
+          "explanation": { "type": "string", "nullable": true }
+        }
+      },
+      "ComparisonResponse": {
+        "type": "object",
+        "properties": {
+          "decision_id":   { "type": "string" },
+          "decision_spec": { "$ref": "#/components/schemas/DecisionSpec" },
+          "scenarios":     { "type": "array", "items": { "$ref": "#/components/schemas/Scenario" } },
+          "results":       { "type": "object", "description": "Dict[scenario_id → ScenarioResult]" },
+          "explanation":   { "type": "object", "description": "AI recommendation (Regex Numeric Guard verified)" }
+        }
+      },
+      "BranchScenarioRequest": {
+        "type": "object",
+        "required": ["name", "change"],
+        "properties": {
+          "name":   { "type": "string" },
+          "change": { "type": "object" }
+        }
       }
     }
   }
