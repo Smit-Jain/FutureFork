@@ -4,7 +4,7 @@ Member 5: Added upload/commit methods for the CSV inspect→commit pipeline.
 """
 
 import base64
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -64,7 +64,7 @@ class Repository:
     ) -> UploadModel:
         """Persist raw CSV bytes (base64) with a TTL expiry for /datasets/inspect."""
         encoded = base64.b64encode(csv_bytes).decode("utf-8")
-        expires = datetime.utcnow() + timedelta(minutes=ttl_minutes)
+        expires = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=ttl_minutes)
         model = UploadModel(
             upload_id=upload_id,
             filename=filename,
@@ -82,7 +82,7 @@ class Repository:
         row = self.db.query(UploadModel).filter(UploadModel.upload_id == upload_id).first()
         if not row:
             return None
-        if row.expires_at < datetime.utcnow():
+        if row.expires_at < datetime.now(timezone.utc).replace(tzinfo=None):
             # TTL expired — delete and return None
             self.db.delete(row)
             self.db.commit()

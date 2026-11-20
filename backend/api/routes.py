@@ -133,10 +133,49 @@ async def inspect_dataset(
     preview_rows: List[Dict[str, Any]] = []
 
     try:
-        from ai.agents.mapper import propose_column_mapping  # Member 4
-        result = propose_column_mapping(raw_bytes, filename=filename)
-        proposed_mapping = result.get("mapping", {})
-        preview_rows = result.get("preview_rows", [])
+        import csv as _csv
+        import io as _io
+        # Decode raw bytes to get headers + sample rows for Member 4's propose_mapping API
+        _text = None
+        for _enc in ("utf-8-sig", "utf-8", "latin-1", "cp1252"):
+            try:
+                _text = raw_bytes.decode(_enc)
+                break
+            except UnicodeDecodeError:
+                continue
+        _text = _text or raw_bytes.decode("latin-1", errors="replace")
+        _reader = _csv.DictReader(_io.StringIO(_text))
+        _headers = list(_reader.fieldnames or [])
+        _sample_rows = []
+        for _i, _row in enumerate(_reader):
+            if _i >= 3:
+                break
+            _sample_rows.append(dict(_row))
+
+        from ai.agents.mapper import propose_mapping  # Member 4
+        # Sniff dataset type from filename for a better mapping hint
+        _fname_lower = filename.lower()
+        _dtype_hint = (
+            "institute" if any(k in _fname_lower for k in ["erp", "institute", "college"])
+            else "startup" if any(k in _fname_lower for k in ["pnl", "startup", "burn"])
+            else "personal"
+        )
+        _result = propose_mapping(_headers, _sample_rows, dataset_type_hint=_dtype_hint)
+        # MappingResult has .mapping (ColumnMapping dataclass) and .confidence
+        _col_map = _result.mapping if hasattr(_result, "mapping") else _result
+        if hasattr(_col_map, "to_dict"):
+            proposed_mapping = _col_map.to_dict()
+        elif hasattr(_col_map, "__dict__"):
+            proposed_mapping = {k: v for k, v in _col_map.__dict__.items() if not k.startswith("_")}
+        else:
+            proposed_mapping = dict(_col_map) if _col_map else {}
+        # Build 5-row preview from already-read sample rows
+        _reader2 = _csv.DictReader(_io.StringIO(_text))
+        preview_rows = []
+        for _i, _row in enumerate(_reader2):
+            if _i >= 5:
+                break
+            preview_rows.append(dict(_row))
     except (ImportError, AttributeError, Exception) as exc:
         logger.warning(f"mapper agent unavailable ({exc}), using regex fallback")
         proposed_mapping, preview_rows = _regex_mapping_fallback(raw_bytes, filename)

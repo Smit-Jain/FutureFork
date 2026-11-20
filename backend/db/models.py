@@ -8,7 +8,7 @@ Member 5 additions:
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Column, DateTime, Float, String, Text
+from sqlalchemy import JSON, Column, DateTime, Float, String, Text, func
 
 from backend.db.session import Base
 
@@ -26,7 +26,7 @@ class UploadModel(Base):
     preview_rows = Column(JSON,  nullable=True)          # 5-row preview list[dict]
     column_mapping = Column(JSON, nullable=True)         # proposed ColumnMapping dict
     expires_at   = Column(DateTime, nullable=False)      # created_at + 15 min TTL
-    created_at   = Column(DateTime, default=datetime.utcnow)
+    created_at   = Column(DateTime, default=func.now())
 
 
 # ---------------------------------------------------------------------------
@@ -42,7 +42,7 @@ class DatasetModel(Base):
     stats            = Column(JSON, nullable=False)
     baseline_metrics = Column(JSON, nullable=False)
     payload          = Column(JSON, nullable=True)   # Full dataset bundle
-    created_at       = Column(DateTime, default=datetime.utcnow)
+    created_at       = Column(DateTime, default=func.now())
 
 
 class DecisionModel(Base):
@@ -54,7 +54,7 @@ class DecisionModel(Base):
     status     = Column(String(50), default="ok")
     message    = Column(Text, nullable=True)
     spec       = Column(JSON, nullable=False)         # DecisionSpec dict
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=func.now())
 
 
 class ScenarioModel(Base):
@@ -67,7 +67,7 @@ class ScenarioModel(Base):
     description = Column(Text, nullable=True)
     change      = Column(JSON, nullable=False)
     status      = Column(String(50), default="queued")  # queued|running|done|failed
-    created_at  = Column(DateTime, default=datetime.utcnow)
+    created_at  = Column(DateTime, default=func.now())
 
 
 class RunModel(Base):
@@ -78,8 +78,8 @@ class RunModel(Base):
     overall_status   = Column(String(50), default="queued")  # queued|running|done|failed
     progress_percent = Column(Float, default=0.0)
     scenario_statuses = Column(JSON, default=dict)           # Dict[scenario_id, status]
-    created_at       = Column(DateTime, default=datetime.utcnow)
-    updated_at       = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at       = Column(DateTime, default=func.now())
+    updated_at       = Column(DateTime, default=func.now(), onupdate=func.now())
 
 
 class ResultModel(Base):
@@ -91,7 +91,7 @@ class ResultModel(Base):
     simulation  = Column(JSON, nullable=False)
     timetable   = Column(JSON, nullable=False)
     explanation = Column(Text, nullable=True)
-    created_at  = Column(DateTime, default=datetime.utcnow)
+    created_at  = Column(DateTime, default=func.now())
 
 
 class CacheModel(Base):
@@ -99,4 +99,4 @@ class CacheModel(Base):
 
     cache_key  = Column(String(255), primary_key=True, index=True)
     result     = Column(JSON, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=func.now())
