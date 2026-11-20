@@ -29,7 +29,6 @@ if str(ROOT) not in sys.path:
 from backend.api import routes
 from backend.db.repository import SessionLocal, init_db
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -101,7 +100,6 @@ def test_keep_warm_ping():
 async def test_inspect_dataset_valid_csv(db_session):
     """Uploading a valid CSV returns upload_id + proposed_mapping + preview."""
     from fastapi import UploadFile
-    import io
 
     csv_bytes = _make_minimal_csv()
     file = UploadFile(filename="personal_upi.csv", file=io.BytesIO(csv_bytes))
@@ -124,7 +122,6 @@ async def test_inspect_dataset_valid_csv(db_session):
 async def test_inspect_dataset_empty_file(db_session):
     """Uploading an empty file returns 400."""
     from fastapi import UploadFile
-    import io
 
     file = UploadFile(filename="empty.csv", file=io.BytesIO(b""))
     with pytest.raises(Exception) as exc_info:
@@ -140,8 +137,8 @@ async def test_inspect_dataset_empty_file(db_session):
 def committed_dataset_id(db_session):
     """Synchronously run inspect + commit and return dataset_id for reuse."""
     import asyncio
+
     from fastapi import UploadFile
-    import io
 
     csv_bytes = _make_minimal_csv()
     file = UploadFile(filename="personal_upi.csv", file=io.BytesIO(csv_bytes))
@@ -397,8 +394,9 @@ async def test_full_financial_pipeline(db_session):
     Smoke test: upload → inspect → commit → decision → scenarios → run → compare
     Validates the complete Member 5 pipeline in one shot.
     """
-    from fastapi import UploadFile
     import io as _io
+
+    from fastapi import UploadFile
 
     # 1. Inspect
     csv_bytes = _make_minimal_csv()

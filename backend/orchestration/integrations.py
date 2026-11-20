@@ -12,8 +12,9 @@ def call_parse_decision(text: str, dataset_summary: Dict[str, Any]) -> Dict[str,
     """Calls D's parse_financial_decision(text, ...) or reference parser."""
     # Try current API first
     try:
-        from ai.agents.parser import parse_financial_decision
         import dataclasses
+
+        from ai.agents.parser import parse_financial_decision
         dataset_type = dataset_summary.get("dataset_type", "personal")
         result = parse_financial_decision(text, baseline=dataset_summary, dataset_type=dataset_type)
         # parse_financial_decision returns a ParsedDecision dataclass — convert to pipeline dict
@@ -147,8 +148,9 @@ def call_generate_scenarios(decision_spec: Dict[str, Any]) -> List[Dict[str, Any
     """Calls D's build_forks(prompt, baseline, dataset_type) or reference scenario generator."""
     # Try current API first
     try:
-        from ai.agents.scenario import build_forks
         import dataclasses
+
+        from ai.agents.scenario import build_forks
         prompt = decision_spec.get("text", "")
         baseline = decision_spec.get("baseline", {})
         dataset_type = decision_spec.get("dataset_type", "personal")
@@ -428,8 +430,9 @@ def call_explain(decision_spec: Dict[str, Any], results: Dict[str, Any]) -> Dict
     """Calls D's explain_branches(decision, branch_results) or reference explainer."""
     # Try current API first
     try:
-        from ai.agents.explainer import explain_branches
         import dataclasses
+
+        from ai.agents.explainer import explain_branches
         result = explain_branches(decision_spec, results)
         # explain_branches returns ExplanationResult dataclass — convert to dict
         if dataclasses.is_dataclass(result) and not isinstance(result, type):

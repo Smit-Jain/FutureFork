@@ -21,7 +21,7 @@ import logging
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -312,7 +312,8 @@ def commit_dataset(req: CommitRequest, db: Session = Depends(get_db)):
     # --- Member 1: FinancialIngestor.compile ---
     instance = None
     try:
-        from data.ingestor import ColumnMapping as IngestorMapping, FinancialIngestor  # Member 1
+        from data.ingestor import ColumnMapping as IngestorMapping  # Member 1
+        from data.ingestor import FinancialIngestor
         col_map = IngestorMapping.from_dict(confirmed_mapping)
         dataset_id = f"ds_{uuid.uuid4().hex[:12]}"
         ds_name = req.dataset_name or filename.replace(".csv", "").replace("_", " ").title()
