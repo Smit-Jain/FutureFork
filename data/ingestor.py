@@ -211,8 +211,10 @@ def clean_currency_series(series: pd.Series) -> pd.Series:
     s = s.replace(r"^(nan|NaN|None|-|\s*)$", "0", regex=True)
     # Accounting parentheses negative format: (1,234.50) -> -1234.50
     s = s.str.replace(r"^\s*\((.*)\)\s*$", r"-\1", regex=True)
-    # Strip currency symbols and commas: ₹, Rs., Rs, INR, inr, $, spaces
-    s = s.str.replace(r"[₹$RsINRinr,\s]", "", regex=True)
+    # Strip word currency prefixes: Rs., Rs, INR, inr
+    s = s.str.replace(r"(?i)\b(inr|rs)\.?\s*", "", regex=True)
+    # Strip currency symbols, commas, and remaining spaces: ₹, $, commas, spaces
+    s = s.str.replace(r"[₹$,\s]", "", regex=True)
     # Convert to numeric, errors to NaN, fillna with 0.0
     return pd.to_numeric(s, errors="coerce").fillna(0.0).astype(np.float64)
 
@@ -373,12 +375,18 @@ class FinancialIngestor:
         if decoded_text is None:
             decoded_text = raw_bytes.decode("utf-8", errors="replace")
 
+        if not decoded_text.strip():
+            return pd.DataFrame()
+
         # Read CSV with defensive parsing
-        df = pd.read_csv(
-            io.StringIO(decoded_text),
-            skipinitialspace=True,
-            low_memory=False,
-        )
+        try:
+            df = pd.read_csv(
+                io.StringIO(decoded_text),
+                skipinitialspace=True,
+                low_memory=False,
+            )
+        except (pd.errors.EmptyDataError, ValueError):
+            return pd.DataFrame()
 
         # Clean column headers
         df.columns = [str(c).strip() for c in df.columns]

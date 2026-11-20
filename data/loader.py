@@ -36,24 +36,43 @@ LEGACY_SAMPLE_DIR = DATA_DIR / "sample"
 # FINANCIAL DATASET HELPERS (MEMBER 1 NEW API)
 # ==============================================================================
 
-def _resolve_sample_path(name: str, default_ext: str = ".csv") -> Path:
+def _resolve_sample_path(name: Union[str, Path], default_ext: str = ".csv") -> Path:
     """Helper to resolve sample file from name in samples/ or sample/ directory."""
+    p_name = Path(name)
     clean_name = str(name).strip()
-    candidate_names = [clean_name]
+    base_name = p_name.name
+
+    # Check direct file or root-relative file first
+    if p_name.is_file():
+        return p_name.resolve()
+    if (ROOT_DIR / p_name).is_file():
+        return (ROOT_DIR / p_name).resolve()
+
+    candidate_names = [clean_name, base_name]
     if not clean_name.endswith(default_ext):
         candidate_names.append(f"{clean_name}{default_ext}")
+    if not base_name.endswith(default_ext):
+        candidate_names.append(f"{base_name}{default_ext}")
+
+    seen = set()
+    deduped = []
+    for c in candidate_names:
+        if c not in seen:
+            seen.add(c)
+            deduped.append(c)
 
     # Priority search locations
-    for c_name in candidate_names:
-        for parent in [Path("."), SAMPLES_DIR, LEGACY_SAMPLE_DIR, DATA_DIR]:
-            p = parent / c_name
-            if p.exists() and p.is_file():
-                return p.resolve()
+    for c_name in deduped:
+        for parent in [Path("."), ROOT_DIR, SAMPLES_DIR, LEGACY_SAMPLE_DIR, DATA_DIR]:
+            p = (parent / c_name).resolve()
+            if p.is_file():
+                return p
 
     raise FileNotFoundError(
-        f"Financial sample file '{name}' not found. Searched for candidates {candidate_names} in:\n"
+        f"Financial sample file '{name}' not found. Searched for candidates {deduped} in:\n"
         f" - {SAMPLES_DIR}\n"
-        f" - {LEGACY_SAMPLE_DIR}"
+        f" - {LEGACY_SAMPLE_DIR}\n"
+        f" - {ROOT_DIR}"
     )
 
 
