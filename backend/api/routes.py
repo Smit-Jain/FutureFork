@@ -32,12 +32,20 @@ from backend.orchestration.integrations import (
     call_explain,
     call_generate_scenarios,
     call_parse_decision,
+    call_stress_test,
     dataset_type_of,
     load_instance,
     to_api_result,
 )
 from backend.orchestration.runner import dispatch_decision_run
-from contracts.schemas import ComparisonResponse, FinancialScenarioResult, RunStatus, Scenario
+from contracts.schemas import (
+    ComparisonResponse,
+    FinancialScenarioResult,
+    RunStatus,
+    Scenario,
+    StressRequest,
+    StressResponse,
+)
 
 logger = logging.getLogger("futurefork.api")
 
@@ -416,6 +424,42 @@ def get_decision_comparison(decision_id: str, db: Session = Depends(get_db)):
         "results": {sid: to_api_result(raw) for sid, raw in raw_results.items()},
         "explanation": call_explain(decision, raw_results),
     }
+
+
+# ---------------------------------------------------------------------------
+# 10b. POST /decisions/{id}/stress — Crisis Playground (engine-backed)
+# ---------------------------------------------------------------------------
+
+@router.post("/decisions/{decision_id}/stress", response_model=StressResponse)
+def stress_decision(decision_id: str, req: StressRequest, db: Session = Depends(get_db)):
+    """
+    Re-runs the Monte Carlo simulation for every fork of a decision with extra shocks
+    (late inflows, a surprise bill, higher spending, a different floor). Takes a few ms,
+    so the UI can call it as sliders move.
+    """
+    repo = Repository(db)
+    decision = _get_decision_or_404(repo, decision_id)
+    scenarios = repo.get_scenarios(decision_id)
+    if not scenarios:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"error": "NO_SCENARIOS", "message": "Generate scenarios for this decision first."},
+        )
+    ds = _get_dataset_or_404(repo, decision["dataset_id"])
+    try:
+        out = call_stress_test(
+            load_instance(ds.get("payload") or {}),
+            scenarios,
+            req.model_dump(),
+            n_sims=settings.NUM_SIMULATION_RUNS,
+            seed=settings.RANDOM_SEED,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": "STRESS_FAILED", "message": str(exc)},
+        ) from exc
+    return {"decision_id": decision_id, "stress": req.model_dump(), **out}
 
 
 # ---------------------------------------------------------------------------

@@ -79,6 +79,8 @@ Each solved schedule is replayed 300 times (vectorized `(runs, 12, categories)` 
 
 The simulator returns the risk metrics above plus a monthly P10/P50/P90 balance band for the UI's confidence ribbon.
 
+An optional `stress` dict adds the Crisis Playground shocks to every run: `inflow_delay_days` (inflows shift later; money pushed past month 12 doesn't arrive), `surprise_outflow` (a one-off bill in month 1), `spend_increase_pct` (all regular spending scaled up) and `emergency_floor` (score against a different floor). The plan isn't re-optimised, and the same seed is used, so zero stress reproduces the stored result exactly. `evaluate_financial_branch(..., stress=...)` passes it through.
+
 ---
 
 ## 6. Public API

@@ -398,6 +398,56 @@
         }
       }
     },
+    "/decisions/{decision_id}/stress": {
+      "post": {
+        "summary": "Stress Decision",
+        "description": "Re-runs the Monte Carlo simulation for every fork of a decision with extra shocks\n(late inflows, a surprise bill, higher spending, a different floor). Takes a few ms,\nso the UI can call it as sliders move.",
+        "operationId": "stress_decision_decisions__decision_id__stress_post",
+        "parameters": [
+          {
+            "name": "decision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Decision Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StressRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StressResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/scenarios/{parent_scenario_id}/branch": {
       "post": {
         "summary": "Branch Scenario Endpoint",
@@ -1193,6 +1243,172 @@
           "runtime_s"
         ],
         "title": "SolverInfo"
+      },
+      "StressRequest": {
+        "properties": {
+          "inflow_delay_days": {
+            "type": "number",
+            "maximum": 90.0,
+            "minimum": 0.0,
+            "title": "Inflow Delay Days",
+            "description": "Every inflow arrives this many days late",
+            "default": 0.0
+          },
+          "surprise_outflow": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Surprise Outflow",
+            "description": "One-off unexpected bill in the first month (\u20b9)",
+            "default": 0.0
+          },
+          "spend_increase_pct": {
+            "type": "number",
+            "maximum": 100.0,
+            "minimum": -50.0,
+            "title": "Spend Increase Pct",
+            "description": "All regular spending is this % higher",
+            "default": 0.0
+          },
+          "emergency_floor": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emergency Floor",
+            "description": "Score against this floor (\u20b9); default: the plan's"
+          }
+        },
+        "type": "object",
+        "title": "StressRequest"
+      },
+      "StressResponse": {
+        "properties": {
+          "decision_id": {
+            "type": "string",
+            "title": "Decision Id"
+          },
+          "stress": {
+            "$ref": "#/components/schemas/StressRequest"
+          },
+          "emergency_floor": {
+            "type": "number",
+            "title": "Emergency Floor",
+            "description": "Floor the results were scored against (\u20b9)"
+          },
+          "n_runs": {
+            "type": "integer",
+            "title": "N Runs"
+          },
+          "runtime_ms": {
+            "type": "number",
+            "title": "Runtime Ms",
+            "description": "Total engine time for all forks"
+          },
+          "results": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/StressedResult"
+            },
+            "type": "object",
+            "title": "Results"
+          }
+        },
+        "type": "object",
+        "required": [
+          "decision_id",
+          "stress",
+          "emergency_floor",
+          "n_runs",
+          "runtime_ms",
+          "results"
+        ],
+        "title": "StressResponse"
+      },
+      "StressedResult": {
+        "properties": {
+          "scenario_id": {
+            "type": "string",
+            "title": "Scenario Id"
+          },
+          "branch_type": {
+            "type": "string",
+            "enum": [
+              "baseline",
+              "upfront",
+              "emi",
+              "phased",
+              "trim",
+              "absorb",
+              "delay",
+              "phase_in"
+            ],
+            "title": "Branch Type"
+          },
+          "survival_score_pct": {
+            "type": "number",
+            "title": "Survival Score Pct"
+          },
+          "cash_out_risk_pct": {
+            "type": "number",
+            "title": "Cash Out Risk Pct"
+          },
+          "floor_breach_risk_pct": {
+            "type": "number",
+            "title": "Floor Breach Risk Pct"
+          },
+          "p10_worst_balance": {
+            "type": "number",
+            "title": "P10 Worst Balance",
+            "description": "10th-percentile lowest balance under stress (\u20b9)"
+          },
+          "p50_worst_balance": {
+            "type": "number",
+            "title": "P50 Worst Balance",
+            "description": "Median lowest balance under stress (\u20b9)"
+          },
+          "balance_p10": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Balance P10",
+            "description": "Monte Carlo P10 balance per month under stress"
+          },
+          "balance_p50": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Balance P50",
+            "description": "Monte Carlo P50 balance per month under stress"
+          },
+          "balance_p90": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Balance P90",
+            "description": "Monte Carlo P90 balance per month under stress"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scenario_id",
+          "branch_type",
+          "survival_score_pct",
+          "cash_out_risk_pct",
+          "floor_breach_risk_pct",
+          "p10_worst_balance",
+          "p50_worst_balance",
+          "balance_p10",
+          "balance_p50",
+          "balance_p90"
+        ],
+        "title": "StressedResult"
       },
       "ValidationError": {
         "properties": {

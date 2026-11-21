@@ -32,6 +32,8 @@ CASES = [
     ("Buy a bike for 1.2 lakh at 11% interest over 24 months, keep minimum balance of 40k",
      {"total_cost": 120000, "emi_months": 24, "emergency_floor": 40000, "interest_rate_annual": 0.11}),
     ("mujhe 50 hazar ka phone lena hai", {"total_cost": 50000, "item_label": "phone"}),
+    ("mujhe agle mahine 80 hazar ka phone lena hai, bank mein kam se kam 40k rehna chahiye",
+     {"total_cost": 80000, "emergency_floor": 40000, "target_month": 1, "quantity": None, "item_label": "phone"}),
     ("$2000 laptop", {"total_cost": 2000, "item_label": "laptop"}),
     ("Buy a phone under 30k", {"total_cost": 30000}),
     ("Can I save 3 lakh by March?", {"total_cost": 300000, "target_month": 11, "interest_rate_annual": 0.0}),

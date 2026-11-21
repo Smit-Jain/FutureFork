@@ -200,6 +200,37 @@ export interface ComparisonResponse {
   explanation: Explanation;
 }
 
+// ─── Crisis Playground (engine-backed stress test) ──────────────────────────
+
+export interface StressRequest {
+  inflow_delay_days: number;        // every inflow arrives this many days late
+  surprise_outflow: number;         // one-off unexpected bill in the first month (₹)
+  spend_increase_pct: number;       // all regular spending is this % higher
+  emergency_floor?: number | null;  // score against this floor; default: the plan's
+}
+
+export interface StressedResult {
+  scenario_id: string;
+  branch_type: BranchType;
+  survival_score_pct: number;
+  cash_out_risk_pct: number;
+  floor_breach_risk_pct: number;
+  p10_worst_balance: number;
+  p50_worst_balance: number;
+  balance_p10: number[];
+  balance_p50: number[];
+  balance_p90: number[];
+}
+
+export interface StressResponse {
+  decision_id: string;
+  stress: StressRequest;
+  emergency_floor: number;
+  n_runs: number;
+  runtime_ms: number;
+  results: Record<string, StressedResult>;
+}
+
 export interface ApiError {
   error: string;
   message: string;

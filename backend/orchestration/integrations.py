@@ -9,6 +9,7 @@ branch, the exception propagates and the runner marks that scenario as failed.
 from __future__ import annotations
 
 import dataclasses
+import time
 import uuid
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
@@ -197,6 +198,54 @@ def call_evaluate_scenario(
     return raw
 
 
+def call_stress_test(
+    instance: FinancialProblemInstance,
+    scenarios: List[Dict[str, Any]],
+    stress: Dict[str, Any],
+    n_sims: int = 300,
+    seed: int = 42,
+) -> Dict[str, Any]:
+    """
+    Crisis Playground: re-evaluates every scenario with extra Monte Carlo stress.
+
+    Each fork is re-solved with its original inputs (so the plan is the same one the user saw)
+    and only the simulation gets the stress. Same seed as the stored run, so zero stress
+    reproduces the stored numbers. Raises on failure; never returns placeholder numbers.
+    """
+    start = time.perf_counter()
+    results: Dict[str, Any] = {}
+    floor_used = 0.0
+    n_runs = n_sims
+    for sc in scenarios:
+        change = sc.get("change") or {}
+        result = evaluate_financial_branch(
+            instance, str(change.get("type") or ""), change.get("params") or {},
+            n_sims=n_sims, seed=seed, stress=stress,
+        )
+        sim = result.simulation_results or {}
+        traj = sim.get("monthly_trajectories") or []
+        floor_used = float(sim.get("emergency_floor", 0.0))
+        n_runs = int(sim.get("n_runs", n_sims))
+        results[sc["id"]] = {
+            "scenario_id": sc["id"],
+            "branch_type": result.branch_type,
+            "survival_score_pct": sim["survival_score_pct"],
+            "cash_out_risk_pct": sim["cash_out_risk_pct"],
+            "floor_breach_risk_pct": sim["floor_breach_risk_pct"],
+            "p10_worst_balance": sim["p10_lowest_balance"],
+            "p50_worst_balance": sim["p50_lowest_balance"],
+            "balance_p10": [m["p10"] for m in traj],
+            "balance_p50": [m["p50"] for m in traj],
+            "balance_p90": [m["p90"] for m in traj],
+        }
+    return {
+        "emergency_floor": floor_used,
+        "n_runs": n_runs,
+        "runtime_ms": round((time.perf_counter() - start) * 1000.0, 2),
+        "results": results,
+    }
+
+
 # ---------------------------------------------------------------------------
 # 4. Explanation (Numeric Guard enforced inside explain_branches)
 # ---------------------------------------------------------------------------
@@ -330,6 +379,7 @@ __all__ = [
     "call_generate_scenarios",
     "call_evaluate_scenario",
     "call_explain",
+    "call_stress_test",
     "scenario_id_for",
     "to_api_result",
 ]

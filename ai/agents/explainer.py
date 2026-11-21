@@ -174,8 +174,18 @@ def _build_allowed_facts(
             money_set.add(cost)
         if floor > 0:
             money_set.add(floor)
+        # The user's own input amounts for recurring costs and income changes
+        for name in ("monthly_amount", "income_change_monthly"):
+            val = abs(float(getattr(decision, name, 0.0) or 0.0))
+            if val > 0:
+                money_set.add(val)
+        pct = abs(float(getattr(decision, "income_change_pct", 0.0) or 0.0))
+        if pct > 0:
+            percent_set.add(pct)
         month_set.add(int(getattr(decision, "target_month", 0)))
         month_set.add(int(getattr(decision, "emi_months", 6)))
+        for name in ("start_month", "duration_months"):
+            month_set.add(int(getattr(decision, name, 0) or 0))
 
     _MONEY_METRIC_KEYS = {
         "total_purchase_cost", "total_financing_interest", "total_trims_saved",
@@ -592,7 +602,10 @@ def _build_template_explanation(
 _LLM_EXPLAINER_SYSTEM = """You are a financial decision explainer for FutureFork.
 Explain the competing options for the user's decision clearly and factually, and recommend one.
 IMPORTANT: Use ONLY the numeric values provided in the data below. Do not invent or approximate numbers.
-Write in professional plain English. Keep it under 400 words."""
+Write every amount in Indian rupees with the ₹ symbol (e.g. ₹1,99,867 or -₹5,61,558), never $ or another currency.
+Refer to options by their display titles, not internal ids like "phase_in".
+Write in professional plain English. Keep it under 400 words.
+Return a JSON object: {"explanation": "<your text>"}."""
 
 
 def _llm_explain(
@@ -616,12 +629,22 @@ def _llm_explain(
     try:
         import json as _json
 
-        from pydantic import BaseModel
+        from pydantic import BaseModel, model_validator
 
         from ai.llm import call_structured_llm
 
         class _ExplainSchema(BaseModel):
             explanation: str
+
+            @model_validator(mode="before")
+            @classmethod
+            def _accept_aliases(cls, data: Any) -> Any:
+                # Models sometimes name the field "summary" or "text"; accept those.
+                if isinstance(data, dict) and "explanation" not in data:
+                    for key in ("summary", "text", "answer", "response"):
+                        if isinstance(data.get(key), str):
+                            return {"explanation": data[key]}
+                return data
 
         summary_data: Dict[str, Any] = {}
         for fid, result in branch_results.items():
@@ -737,6 +760,7 @@ def explain_branches(
             "Template failed guard (%d violations) — auto-whitelisting and retrying",
             len(report.violations),
         )
+        logger.debug("Template guard violations: %s", [v.offending_text for v in report.violations])
         for v in report.violations:
             if v.kind == "money":
                 val = _parse_money_from_token(v.offending_text)

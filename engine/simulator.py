@@ -18,7 +18,7 @@ Executes a vectorized (300, 12) simulation matrix over 12-month CP-SAT schedules
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
 
@@ -38,6 +38,7 @@ def run_financial_monte_carlo(
     n_runs: int = 300,
     seed: int = 42,
     inject_shocks: bool = True,
+    stress: Optional[Dict[str, float]] = None,
 ) -> Dict[str, Any]:
     """
     Executes a vectorized (n_runs, 12) Monte Carlo risk simulation on a 12-month financial schedule.
@@ -45,6 +46,15 @@ def run_financial_monte_carlo(
     - Shock 1: Inflow Delay Shock (revenue shifted t -> t+1)
     - Shock 2: Emergency Outflow Shock (unexpected capital/medical/repair expenses)
     - Shock 3: Category Inflation Drift (Gaussian perturbation on flexible buckets using historical sigma)
+
+    Optional user stress (the Crisis Playground), applied to every run on top of the shocks above:
+    - inflow_delay_days:   every month's inflow arrives this many days late (30 days = one month)
+    - surprise_outflow:    a one-off unexpected bill in the first month
+    - spend_increase_pct:  all regular spending is this much higher
+    - emergency_floor:     score against this floor instead of the plan's
+
+    The plan itself is not re-optimised: stress shows how the solved plan holds up.
+    The same seed gives the same random draws, so zero stress reproduces the stored result.
 
     Performance: Vectorized NumPy execution completes in < 15ms for 300 runs.
     """
@@ -92,6 +102,24 @@ def run_financial_monte_carlo(
     floor = _get_val(monthly_schedules[0], "emergency_floor", 0.0)
     b0 = float(instance.starting_balance)
 
+    stress = dict(stress or {})
+    delay_days = max(0.0, float(stress.get("inflow_delay_days") or 0.0))
+    surprise = max(0.0, float(stress.get("surprise_outflow") or 0.0))
+    spend_factor = 1.0 + max(-90.0, float(stress.get("spend_increase_pct") or 0.0)) / 100.0
+    if stress.get("emergency_floor") is not None:
+        floor = max(0.0, float(stress["emergency_floor"]))
+    if delay_days > 0:
+        # Shift each month's inflow later by delay_days (k whole months plus a fraction r).
+        # Money pushed past the last month doesn't arrive within the horizon.
+        k, r = int(delay_days // 30), (delay_days % 30) / 30.0
+        shifted = np.zeros(T, dtype=np.float64)
+        for t in range(T):
+            if t + k < T:
+                shifted[t + k] += planned_inflows[t] * (1.0 - r)
+            if t + k + 1 < T:
+                shifted[t + k + 1] += planned_inflows[t] * r
+        planned_inflows = shifted
+
     # Build (12, 8) planned category outflow matrix incorporating category trims
     num_cats = len(instance.categories)
     O_planned = np.zeros((T, num_cats), dtype=np.float64)
@@ -130,7 +158,7 @@ def run_financial_monte_carlo(
                 spend_multipliers[:, :, c] = rng.normal(1.0, 0.01, size=(n_runs, T))
 
     # Broadcast category matrix across runs: (n_runs, 12, 8)
-    sim_category_outflows = O_planned[np.newaxis, :, :] * spend_multipliers
+    sim_category_outflows = O_planned[np.newaxis, :, :] * spend_multipliers * spend_factor
     # Sum across the 8 categories to get base monthly operating outflows: (n_runs, 12)
     sim_operating_outflows = np.sum(sim_category_outflows, axis=2)
 
@@ -151,6 +179,8 @@ def run_financial_monte_carlo(
 
     # Total simulated monthly outflows = operating + purchase outlay + emergency shocks
     sim_total_outflows = sim_operating_outflows + purchase_outflows[np.newaxis, :] + emergency_shocks
+    if surprise > 0:
+        sim_total_outflows[:, 0] += surprise
 
     # --- SHOCK 1: Inflow Delay Shock ---
     # Salary, student tuition grant, or client invoice delayed by 1 month (t -> t+1)
@@ -268,6 +298,13 @@ def run_financial_monte_carlo(
             "category_drift_active": inject_shocks,
         },
         "monthly_trajectories": monthly_trajectories,
+        "emergency_floor": floor,
+        "stress": {
+            "inflow_delay_days": delay_days,
+            "surprise_outflow": surprise,
+            "spend_increase_pct": round((spend_factor - 1.0) * 100.0, 2),
+            "emergency_floor": floor,
+        },
         "per_metric": {
             "cash_out_risk": {"mean": cash_out_risk_pct, "p10": cash_out_risk_pct, "p90": cash_out_risk_pct},
             "lowest_balance": {"mean": round(mean_lowest, 1), "p10": round(p10_lowest, 1), "p90": round(p90_lowest, 1)},

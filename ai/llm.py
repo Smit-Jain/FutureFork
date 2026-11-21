@@ -83,17 +83,21 @@ def call_structured_llm(
             import httpx
             headers = {"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"}
             payload = {
-                "model": "llama-3.3-70b-versatile",
+                "model": os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"),
                 "temperature": 0.0,
                 "response_format": {"type": "json_object"},
                 "messages": [
-                    {"role": "system", "content": system_prompt},
+                    # Groq's json_object mode requires the word "json" somewhere in the messages.
+                    {"role": "system", "content": system_prompt if "json" in (system_prompt + prompt).lower()
+                     else system_prompt + "\nRespond with a single JSON object."},
                     {"role": "user", "content": prompt},
                 ],
             }
             resp = httpx.post("https://api.groq.com/openai/v1/chat/completions", json=payload, headers=headers, timeout=15.0)
             if resp.status_code == 200:
                 raw_response_text = resp.json()["choices"][0]["message"]["content"]
+            else:
+                logger.warning(f"Groq API returned {resp.status_code}: {resp.text[:200]}")
         except Exception as ex:
             logger.warning(f"Groq API call failed: {ex}")
 

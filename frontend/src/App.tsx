@@ -309,7 +309,11 @@ export const App: React.FC = () => {
                     <BarChart3 className="w-3.5 h-3.5 text-purple-500" />
                     Comparison Dashboard
                   </h2>
-                  <ComparisonDashboard financialResults={forkResults} selectedFinancialId={selectedId} />
+                  <ComparisonDashboard
+                    financialResults={forkResults}
+                    selectedFinancialId={selectedId}
+                    decisionId={decisionSpec?.id ?? null}
+                  />
                 </section>
 
                 <section className="space-y-3">

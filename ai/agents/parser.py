@@ -184,14 +184,16 @@ _FLOOR_BEFORE = re.compile(
     r"|(?:stay|staying|remain|remaining)\s+(?:above|over)"
     r"|keep(?:ing)?|maintain(?:ing)?|retain(?:ing)?|leav(?:e|ing)|preserv(?:e|ing)|hold(?:ing)?|protect(?:ing)?"
     r"|min(?:imum|\.)?(?:\s+(?:bank\s+)?balance)?(?:\s+of)?|at\s+least|floor\s+of|reserve\s+of|buffer\s+of"
-    r"|cushion\s+of|safety\s+net\s+of|emergency\s+(?:fund|savings?|reserve|corpus)s?(?:\s+of)?)"
+    r"|cushion\s+of|safety\s+net\s+of|emergency\s+(?:fund|savings?|reserve|corpus)s?(?:\s+of)?"
+    r"|kam\s+se\s+kam|kamse\s+kam|minimum)"
     r"\s*(?:at\s+least\s+|a\s+minimum\s+of\s+|minimum\s+|a\s+|an\s+|of\s+|my\s+|our\s+)?$",
     re.IGNORECASE,
 )
 _FLOOR_AFTER = re.compile(
     r"^\s*(?:as|in|of|for)?\s*(?:an?\s+|my\s+|our\s+|the\s+)?(?:emergency\s+)?"
     r"(?:reserves?|savings?|buffer|cushion|minimum|floor|balance|in\s+the\s+bank|in\s+bank|bank\s+balance|"
-    r"safety\s+net|emergency\s+fund|corpus)\b",
+    r"safety\s+net|emergency\s+fund|corpus)\b"
+    r"|^\s*(?:(?:ka|ki|ke)\s+)?(?:rehna|rehne|rakhna|rakhni|bachana|bachna|bache|bachake|chhodna)\b",
     re.IGNORECASE,
 )
 
@@ -235,7 +237,9 @@ _FINANCE_WORDS = re.compile(
     re.IGNORECASE,
 )
 _QTY_RE = re.compile(
-    r"\b(\d+|two|three|four|five|six|seven|eight|nine|ten|twelve|twenty)\s+(?:[a-z\-]+\s+){0,2}?"
+    r"\b(\d+|two|three|four|five|six|seven|eight|nine|ten|twelve|twenty)"
+    r"(?!\s*(?:k|thousands?|hazaa?r|hajar|lakhs?|lacs?|crores?|cr|million|mn|rs|rupees?|inr)\b)"
+    r"\s+(?:[a-z\-]+\s+){0,2}?"
     r"(engineers?|developers?|designers?|people|persons?|employees?|staff|interns?|hires?|members?|analysts?|"
     r"teachers?|faculty|nurses?|drivers?|laptops?|pcs?|computers?|desktops?|monitors?|units?|phones?|servers?|"
     r"machines?|licen[cs]es?|seats?|devices?|systems?|tablets?|gpus?|nodes?|cars?|bikes?|chairs?|desks?)\b",
@@ -339,8 +343,13 @@ def _extract_timing(text: str, months: Optional[List[str]]) -> Optional[int]:
     t = text.lower()
     if re.search(r"\b(?:now|today|immediately|right away|this month|asap)\b", t):
         return 0
-    if re.search(r"\bnext\s+month\b", t):
+    if re.search(r"\b(?:abhi|is\s+mahine|iss\s+mahine)\b", t):
+        return 0
+    if re.search(r"\bnext\s+month\b|\bagle\s+mahine\b|\bagla\s+mahina\b", t):
         return 1
+    m = re.search(r"\b(\d+)\s+mahine\s+(?:baad|mein|me)\b", t)
+    if m:
+        return min(11, int(m.group(1)))
     if re.search(r"\bnext\s+quarter\b", t):
         return 3
     m = re.search(r"\b(?:in|after|within)\s+(\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven)\s+months?\b", t)
@@ -769,11 +778,17 @@ def _llm_parse(
         return None
 
     try:
-        from pydantic import BaseModel
+        from pydantic import BaseModel, model_validator
 
         from ai.llm import call_structured_llm
 
         class _ParseSchema(BaseModel):
+            @model_validator(mode="before")
+            @classmethod
+            def _drop_nulls(cls, data: Any) -> Any:
+                # LLMs send null for fields that don't apply; use the defaults instead.
+                return {k: v for k, v in data.items() if v is not None} if isinstance(data, dict) else data
+
             is_financial_decision: bool = True
             decision_kind: str = "one_time"
             item_label: str = "This purchase"
@@ -893,7 +908,11 @@ def parse_financial_decision(
             for name in ("emergency_floor", "quantity", "downpayment_pct", "interest_rate_annual"):
                 if not getattr(llm_result, name) and getattr(regex_result, name):
                     setattr(llm_result, name, getattr(regex_result, name))
-            if llm_result.financing_preference == "auto":
+            # LLMs tend to guess "upfront" when nothing was said; only trust it if the prompt says so.
+            if llm_result.financing_preference in ("auto", "upfront") and regex_result.financing_preference == "auto" \
+                    and not re.search(r"\b(?:upfront|cash|in\s+full|full\s+payment|ek\s+saath)\b", prompt, re.IGNORECASE):
+                llm_result.financing_preference = "auto"
+            elif llm_result.financing_preference == "auto":
                 llm_result.financing_preference = regex_result.financing_preference
         llm_result.understood = describe_decision(llm_result, months)
         logger.info("parser: used LLM tier (kind=%s)", llm_result.decision_kind)

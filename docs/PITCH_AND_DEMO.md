@@ -40,7 +40,7 @@ All demo numbers below are real engine output for the bundled **Personal UPI** s
 5. **Cash Flow Matrix**: select **Upfront**, tick **Show diff vs baseline**, and show the April purchase hit.
 6. **Comparison Dashboard**: walk through the 12-month balance lines against the emergency-floor line.
 7. **Decision Synthesis**: show the explanation and the **Numeric Guard: passed** label. Stress that every number in the text was checked against engine output.
-8. *(Optional)* Show the **Crisis Shock Playground** sliders, but describe them honestly: they're a quick in-browser estimate, not engine output.
+8. *(Optional)* Drag the **Crisis Shock Playground** sliders (late income, surprise bill, spending rise, floor). Every move re-runs the 300-run Monte Carlo simulation for each fork in a few milliseconds, so the scores update live and still come from the engine.
 
 ### Backup prompts
 - *"Take a ₹2L vacation without dropping below ₹50k reserve"* (Personal): Upfront moves the purchase to May to protect the floor. EMI keeps 100% survival for ₹10,000 interest.
