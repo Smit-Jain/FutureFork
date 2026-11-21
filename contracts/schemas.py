@@ -140,6 +140,39 @@ class ComparisonResponse(BaseModel):
     explanation: Explanation
 
 
+# ---------------------------------------------------------------------------
+# Crisis Playground (engine-backed stress test)
+# ---------------------------------------------------------------------------
+
+class StressRequest(BaseModel):
+    inflow_delay_days: float = Field(0.0, ge=0, le=90, description="Every inflow arrives this many days late")
+    surprise_outflow: float = Field(0.0, ge=0, description="One-off unexpected bill in the first month (₹)")
+    spend_increase_pct: float = Field(0.0, ge=-50, le=100, description="All regular spending is this % higher")
+    emergency_floor: Optional[float] = Field(None, ge=0, description="Score against this floor (₹); default: the plan's")
+
+
+class StressedResult(BaseModel):
+    scenario_id: str
+    branch_type: BranchType
+    survival_score_pct: float
+    cash_out_risk_pct: float
+    floor_breach_risk_pct: float
+    p10_worst_balance: float = Field(..., description="10th-percentile lowest balance under stress (₹)")
+    p50_worst_balance: float = Field(..., description="Median lowest balance under stress (₹)")
+    balance_p10: List[float] = Field(..., description="Monte Carlo P10 balance per month under stress")
+    balance_p50: List[float] = Field(..., description="Monte Carlo P50 balance per month under stress")
+    balance_p90: List[float] = Field(..., description="Monte Carlo P90 balance per month under stress")
+
+
+class StressResponse(BaseModel):
+    decision_id: str
+    stress: StressRequest
+    emergency_floor: float = Field(..., description="Floor the results were scored against (₹)")
+    n_runs: int
+    runtime_ms: float = Field(..., description="Total engine time for all forks")
+    results: Dict[str, StressedResult]
+
+
 class ApiError(BaseModel):
     error: str
     message: str

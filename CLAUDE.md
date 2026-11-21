@@ -56,7 +56,7 @@ contracts/  schemas.py (source of truth, enforced as FastAPI response models),
 
 **Boundaries:** `engine/` never touches HTTP, databases or LLMs. `ai/` never computes metrics. The backend is the only place that wires them together (`backend/orchestration/integrations.py`).
 
-**Request flow:** `POST /datasets/inspect` → `POST /datasets/commit` (12-month Node 0 baseline) → `POST /decisions` (parse) → `POST /decisions/{id}/scenarios` (fan-out) → `POST /decisions/{id}/run` (background solve + Monte Carlo) → `GET /runs/{id}` → `GET /decisions/{id}/compare`.
+**Request flow:** `POST /datasets/inspect` → `POST /datasets/commit` (12-month Node 0 baseline) → `POST /decisions` (parse) → `POST /decisions/{id}/scenarios` (fan-out) → `POST /decisions/{id}/run` (background solve + Monte Carlo) → `GET /runs/{id}` → `GET /decisions/{id}/compare`. The Crisis Playground calls `POST /decisions/{id}/stress`, which re-runs the Monte Carlo simulation with user shocks (engine numbers, not a browser estimate).
 
 ## Decision kinds and forks
 

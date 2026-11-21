@@ -18,7 +18,7 @@ Formulates exact CP-SAT integer programming constraints for 12-month cash flows:
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 
 from ortools.sat.python import cp_model
 
@@ -903,11 +903,12 @@ def attach_simulation(
     instance: FinancialProblemInstance,
     n_sims: int = 300,
     seed: int = 42,
+    stress: Optional[Dict[str, float]] = None,
 ) -> ScenarioEvaluationResult:
     """Runs the Monte Carlo simulator on a solved branch and merges its risk metrics in place."""
     from engine.simulator import run_financial_monte_carlo
 
-    sim = run_financial_monte_carlo(result, instance, n_runs=n_sims, seed=seed)
+    sim = run_financial_monte_carlo(result, instance, n_runs=n_sims, seed=seed, stress=stress)
     result.simulation_results = sim
     for key in (
         "cash_out_risk_pct",
@@ -1041,9 +1042,12 @@ def evaluate_financial_branch(
     goal: Union[PurchaseGoal, Dict[str, Any]],
     n_sims: int = 300,
     seed: int = 42,
+    stress: Optional[Dict[str, float]] = None,
 ) -> ScenarioEvaluationResult:
     """
     Single public entry point used by the backend: evaluates ONE branch end to end.
+    `stress` (optional) adds the Crisis Playground shocks to the Monte Carlo run only;
+    see engine.simulator.run_financial_monte_carlo.
 
     - "baseline": the status quo (no decision applied) against the goal's emergency floor.
     - one_time decisions: "upfront" | "emi" | "phased" | "trim" (fork transformer -> CP-SAT).
@@ -1081,4 +1085,4 @@ def evaluate_financial_branch(
             raise ValueError("An income change needs a percentage or monthly amount")
         result, sim_instance = _evaluate_adjusted_fork(instance, b_type, g)
 
-    return attach_simulation(result, sim_instance, n_sims=n_sims, seed=seed)
+    return attach_simulation(result, sim_instance, n_sims=n_sims, seed=seed, stress=stress)

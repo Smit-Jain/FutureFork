@@ -28,15 +28,7 @@ Beginner-friendly and intermediate issues across the engine, AI layer, backend a
 
 ---
 
-### 4. 🎛️ Make the Crisis Playground engine-backed
-- **Area**: `frontend/src/components/ComparisonDashboard.tsx`, `backend/api/routes.py`, `engine/simulator.py`
-- **Difficulty**: Intermediate
-- **Problem**: The stress sliders estimate survival scores in the browser with a hand-written formula, which bends the Golden Rule.
-- **Definition of Done**: Sliders call an endpoint that re-runs the Monte Carlo simulation with the chosen shock parameters (inflow delay, surprise outflow, drift).
-
----
-
-### 5. 🌿 Custom branch UI
+### 4. 🌿 Custom branch UI
 - **Area**: `frontend/`
 - **Difficulty**: Beginner
 - **Goal**: `POST /scenarios/{id}/branch` already evaluates a user-defined child fork (e.g. "EMI, but 6 months"). Add a "Branch from here" action on scenario cards.
@@ -44,7 +36,7 @@ Beginner-friendly and intermediate issues across the engine, AI layer, backend a
 
 ---
 
-### 6. 📤 Export the winning plan
+### 5. 📤 Export the winning plan
 - **Area**: `frontend/src/components/ComparisonDashboard.tsx`
 - **Difficulty**: Beginner
 - **Goal**: Export the selected fork's 12-month schedule (inflows, category outflows, purchase cash-out, closing balance) as CSV.
@@ -52,7 +44,7 @@ Beginner-friendly and intermediate issues across the engine, AI layer, backend a
 
 ---
 
-### 7. 🧾 New fork type: lease-to-own
+### 6. 🧾 New fork type: lease-to-own
 - **Area**: `engine/changes.py`, `engine/solver.py`, `ai/agents/scenario.py`
 - **Difficulty**: Intermediate
 - **Goal**: Add a fifth strategy with monthly lease payments and an optional buy-out at month N. Follow "Adding a New Fork Type" in the README.
@@ -60,7 +52,7 @@ Beginner-friendly and intermediate issues across the engine, AI layer, backend a
 
 ---
 
-### 8. 📈 Longer horizons
+### 7. 📈 Longer horizons
 - **Area**: `data/ingestor.py`, `engine/`
 - **Difficulty**: Advanced
 - **Goal**: Support 24-month horizons (currently fixed at 12 months).
@@ -68,7 +60,7 @@ Beginner-friendly and intermediate issues across the engine, AI layer, backend a
 
 ---
 
-### 9. 🗄️ Database migrations
+### 8. 🗄️ Database migrations
 - **Area**: `backend/db/`
 - **Difficulty**: Intermediate
 - **Goal**: Add Alembic so schema changes don't require deleting the local SQLite database.
@@ -76,7 +68,7 @@ Beginner-friendly and intermediate issues across the engine, AI layer, backend a
 
 ---
 
-### 10. 🔔 Webhook on run completion
+### 9. 🔔 Webhook on run completion
 - **Area**: `backend/orchestration/runner.py`, `backend/settings.py`
 - **Difficulty**: Beginner
 - **Goal**: Optional `WEBHOOK_URL` receives a JSON summary when a decision run finishes.

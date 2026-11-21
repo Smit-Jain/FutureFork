@@ -9,6 +9,8 @@ import {
   InspectResponse,
   RunStatus,
   Scenario,
+  StressRequest,
+  StressResponse,
 } from '../contracts/types';
 import { buildMockComparison, MOCK_INSPECT_RESPONSE, SAMPLE_DATASETS } from '../mocks/fixtures';
 
@@ -157,6 +159,14 @@ export const api = {
       return buildMockComparison(decisionId, d?.text ?? '', d?.datasetId ?? '');
     }
     return request(`/decisions/${decisionId}/compare`);
+  },
+
+  /** Crisis Playground: re-runs the Monte Carlo simulation for every fork with extra shocks. */
+  async stressDecision(decisionId: string, stress: StressRequest, signal?: AbortSignal): Promise<StressResponse> {
+    if (USE_MOCKS) {
+      throw new Error('The Crisis Playground needs the backend (set VITE_USE_MOCKS=false).');
+    }
+    return request(`/decisions/${decisionId}/stress`, { ...json(stress), signal });
   },
 
   async branchScenario(parentScenarioId: string, name: string, change: ChangeSpec): Promise<Scenario> {

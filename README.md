@@ -151,11 +151,12 @@ Anything FutureFork had to assume is shown under **About your data** before you 
 | 1 | `POST /datasets/inspect` | Upload a CSV/TSV/Excel file (up to 10 MB). Returns the proposed column mapping, a 5-row preview, warnings and an `upload_id` (15-minute TTL) |
 | 2 | `POST /datasets/commit` | Confirm or edit the mapping. Compiles the 12-month **Node 0** baseline |
 | 3 | `POST /decisions` | Parse the plain-English decision into a structured spec |
-| 4 | `POST /decisions/{id}/scenarios` | Generate the baseline plus the 4 forks |
+| 4 | `POST /decisions/{id}/scenarios` | Generate the baseline plus the forks for the decision's kind |
 | 5 | `POST /decisions/{id}/run` | Dispatch CP-SAT and Monte Carlo evaluation in the background |
 | 6 | `GET /runs/{run_id}` | Poll progress and per-fork status |
 | 7 | `GET /decisions/{id}/compare` | Side-by-side results plus the guarded AI explanation |
-| 8 | `POST /scenarios/{id}/branch` | Branch a child fork off any scenario |
+| 8 | `POST /decisions/{id}/stress` | Crisis Playground: re-test every fork under late income, a surprise bill, higher spending or a different floor (a few ms) |
+| 9 | `POST /scenarios/{id}/branch` | Branch a child fork off any scenario |
 
 Interactive API docs: [http://localhost:8000/docs](http://localhost:8000/docs)
 

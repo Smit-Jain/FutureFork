@@ -327,6 +327,53 @@ def test_comparison_endpoint(decision_id, finished_run, db_session):
     assert comp["explanation"]["guard_passed"] is True
 
 
+def test_stress_with_no_shock_reproduces_stored_results(decision_id, finished_run, db_session):
+    from contracts.schemas import StressRequest
+
+    comp = routes.get_decision_comparison(decision_id, db=db_session)
+    out = routes.stress_decision(decision_id, StressRequest(), db=db_session)
+    assert set(out["results"]) == set(comp["results"])
+    for sid, r in out["results"].items():
+        stored = comp["results"][sid]["metrics"]
+        assert r["survival_score_pct"] == stored["survival_score_pct"]
+        assert r["cash_out_risk_pct"] == stored["cash_out_risk_pct"]
+        assert r["p10_worst_balance"] == stored["p10_worst_balance"]
+        assert len(r["balance_p50"]) == 12
+
+
+def test_stress_shocks_make_every_fork_worse(decision_id, finished_run, db_session):
+    from contracts.schemas import StressRequest
+
+    calm = routes.stress_decision(decision_id, StressRequest(), db=db_session)["results"]
+    shocked = routes.stress_decision(
+        decision_id,
+        StressRequest(inflow_delay_days=30, surprise_outflow=200_000, spend_increase_pct=20),
+        db=db_session,
+    )["results"]
+    for sid in calm:
+        assert shocked[sid]["p10_worst_balance"] < calm[sid]["p10_worst_balance"]
+        assert shocked[sid]["survival_score_pct"] <= calm[sid]["survival_score_pct"]
+
+
+def test_stress_floor_override_changes_breach_risk(decision_id, finished_run, db_session):
+    from contracts.schemas import StressRequest
+
+    low = routes.stress_decision(decision_id, StressRequest(emergency_floor=0), db=db_session)
+    high = routes.stress_decision(decision_id, StressRequest(emergency_floor=50_000_000), db=db_session)
+    assert low["emergency_floor"] == 0 and high["emergency_floor"] == 50_000_000
+    for sid in low["results"]:
+        assert high["results"][sid]["floor_breach_risk_pct"] == 100.0
+        assert high["results"][sid]["floor_breach_risk_pct"] >= low["results"][sid]["floor_breach_risk_pct"]
+
+
+def test_stress_decision_not_found(db_session):
+    from contracts.schemas import StressRequest
+
+    with pytest.raises(routes.HTTPException) as exc:
+        routes.stress_decision("dec_missing", StressRequest(), db=db_session)
+    assert exc.value.status_code == 404
+
+
 def test_decisions_do_not_overwrite_each_other(committed_dataset_id, decision_id, finished_run, db_session):
     other = routes.create_decision(
         routes.CreateDecisionRequest(

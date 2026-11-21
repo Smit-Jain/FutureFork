@@ -33,6 +33,7 @@
 4. `POST /decisions/{id}/scenarios` fans the stored decision out into the baseline plus the forks for its kind (`engine.changes.FORKS_BY_KIND`), without re-parsing the prompt. Scenario ids are `{decision_id}_{branch}`, so decisions never overwrite each other.
 5. `POST /decisions/{id}/run` evaluates each fork in a background thread: CP-SAT, then Monte Carlo. Results are cached by dataset, change, seed and run count.
 6. `GET /decisions/{id}/compare` returns every result in the `FinancialScenarioResult` contract plus an explanation that has passed the Numeric Guard.
+7. `POST /decisions/{id}/stress` powers the Crisis Playground: it re-tests every fork's plan under user shocks (late income, a surprise bill, higher spending, a different floor) with the same Monte Carlo seed, in a few milliseconds per request.
 
 ## System boundaries
 
