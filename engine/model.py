@@ -26,6 +26,7 @@ class ColumnMapping:
     category_col: Optional[str] = None
     description_col: Optional[str] = None
     type_col: Optional[str] = None
+    balance_col: Optional[str] = None
     date_format: Optional[str] = None
     starting_balance: float = 0.0
 
@@ -59,6 +60,7 @@ class ColumnMapping:
             data.get("type_col") or data.get("type") or data.get("Type") or
             data.get("transaction_type") or data.get("Txn Type")
         )
+        balance_col = data.get("balance_col")
         date_format = data.get("date_format") or data.get("format")
         starting_balance = float(data.get("starting_balance") or 0.0)
 
@@ -70,6 +72,7 @@ class ColumnMapping:
             category_col=str(category_col).strip() if category_col else None,
             description_col=str(description_col).strip() if description_col else None,
             type_col=str(type_col).strip() if type_col else None,
+            balance_col=str(balance_col).strip() if balance_col else None,
             date_format=str(date_format).strip() if date_format else None,
             starting_balance=starting_balance,
         )
@@ -155,6 +158,14 @@ class PurchaseGoal:
     phased_splits: List[Dict[str, Any]] = field(default_factory=list) # e.g. [{"month": 0, "pct": 0.5}, {"month": 6, "pct": 0.5}]
     max_trim_pct: float = 0.35                   # Maximum cut allowed across flexible categories (0.0 to 1.0)
     flexible_categories: List[str] = field(default_factory=list) # Categories eligible for trim
+    # Decision kind: "one_time" (purchase), "recurring_expense" (hire, subscription, rent, SIP)
+    # or "income_change" (salary cut, job loss, revenue drop/raise)
+    decision_kind: str = "one_time"
+    monthly_amount: float = 0.0                  # recurring_expense: cost per month
+    start_month: int = 0                         # recurring/income: first affected month (0-11)
+    duration_months: int = 12                    # recurring/income: months affected within horizon
+    income_change_pct: float = 0.0               # income_change: e.g. -20.0 for a 20% drop
+    income_change_monthly: float = 0.0           # income_change: absolute change per month (₹)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -169,10 +180,18 @@ class PurchaseGoal:
             financing_mode=str(data.get("financing_mode") or "auto"),
             emi_months=int(data.get("emi_months") or 6),
             downpayment=float(data.get("downpayment") or 0.0),
-            interest_rate_annual=float(data.get("interest_rate_annual") or 0.10),
+            interest_rate_annual=float(
+                data["interest_rate_annual"] if data.get("interest_rate_annual") is not None else 0.10
+            ),
             phased_splits=list(data.get("phased_splits") or []),
             max_trim_pct=float(data.get("max_trim_pct") or 0.35),
             flexible_categories=list(data.get("flexible_categories") or []),
+            decision_kind=str(data.get("decision_kind") or "one_time"),
+            monthly_amount=float(data.get("monthly_amount") or 0.0),
+            start_month=int(data.get("start_month") or 0),
+            duration_months=int(data.get("duration_months") or 12),
+            income_change_pct=float(data.get("income_change_pct") or 0.0),
+            income_change_monthly=float(data.get("income_change_monthly") or 0.0),
         )
 
 

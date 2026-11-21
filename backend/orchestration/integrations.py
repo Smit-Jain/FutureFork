@@ -14,8 +14,13 @@ from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
 from ai.agents.explainer import explain_branches
-from ai.agents.parser import DecisionParseError, parse_financial_decision
-from ai.agents.scenario import build_forks
+from ai.agents.parser import (
+    DecisionParseError,
+    OffTopicPromptError,
+    ParsedDecision,
+    parse_financial_decision,
+)
+from ai.agents.scenario import build_forks_from_decision
 from engine.changes import BRANCH_TYPES
 from engine.model import FinancialProblemInstance
 from engine.solver import evaluate_financial_branch
@@ -68,16 +73,19 @@ def call_parse_decision(
     except DecisionParseError as exc:
         return {
             **base,
+            "decision_kind": None,
             "constraints": [],
             "change": {"type": "upfront", "params": {}},
             "financial": None,
-            "status": "needs_clarification",
+            "understood": None,
+            "status": "unsupported" if isinstance(exc, OffTopicPromptError) else "needs_clarification",
             "message": str(exc),
         }
 
     fin = dataclasses.asdict(parsed)
     return {
         **base,
+        "decision_kind": parsed.decision_kind,
         "constraints": [
             {"kind": "emergency_floor", "params": {"floor": fin["emergency_floor"]}},
         ],
@@ -85,14 +93,23 @@ def call_parse_decision(
             "type": fin["financing_preference"],
             "params": {
                 "item_name": fin["item_label"],
+                "decision_kind": fin["decision_kind"],
                 "total_cost": fin["total_cost"],
                 "emergency_floor": fin["emergency_floor"],
                 "target_month": fin["target_month"],
                 "emi_months": fin["emi_months"],
                 "quantity": fin["quantity"],
+                "monthly_amount": fin["monthly_amount"],
+                "start_month": fin["start_month"],
+                "duration_months": fin["duration_months"],
+                "income_change_pct": fin["income_change_pct"],
+                "income_change_monthly": fin["income_change_monthly"],
+                "downpayment_pct": fin["downpayment_pct"],
+                "interest_rate_annual": fin["interest_rate_annual"],
             },
         },
         "financial": fin,
+        "understood": parsed.understood,
         "status": "ok",
         "message": None,
     }
@@ -113,11 +130,10 @@ def call_generate_scenarios(
 ) -> List[Dict[str, Any]]:
     """Builds the baseline node plus the 4 policy forks for a decision."""
     d_id = decision["id"]
-    fork_set = build_forks(
-        decision.get("text", ""),
-        instance,
-        decision.get("dataset_type", DEFAULT_DATASET_TYPE),
-    )
+    fin = decision.get("financial")
+    if not fin:
+        raise ValueError("Decision has no parsed financial details")
+    fork_set = build_forks_from_decision(ParsedDecision(**fin), instance)
 
     floor = float(getattr(fork_set.baseline_goal, "emergency_floor", 0.0) or 0.0)
     scenarios: List[Dict[str, Any]] = [{
@@ -177,6 +193,7 @@ def call_evaluate_scenario(
     raw["decision_id"] = scenario.get("decision_id")
     raw["branch_type"] = result.branch_type
     raw["category_types"] = dict(instance.category_types)
+    raw["projected_months"] = list(instance.raw_metadata.get("projected_months", []))
     return raw
 
 
@@ -249,6 +266,7 @@ def to_api_result(raw: Dict[str, Any]) -> Dict[str, Any]:
         "decision_id": raw.get("decision_id"),
         "branch_type": raw.get("branch_type"),
         "name": raw.get("scenario_name"),
+        "description": raw.get("description"),
         "is_feasible": bool(raw.get("is_feasible", False)),
         "purchase_month": raw.get("purchase_month", -1),
         "solver": {
@@ -270,6 +288,9 @@ def to_api_result(raw: Dict[str, Any]) -> Dict[str, Any]:
             "total_purchase_cost": float(metrics.get("total_purchase_cost", 0.0)),
             "total_financing_interest": float(metrics.get("total_financing_interest", 0.0)),
             "total_trims_saved": float(metrics.get("total_trims_saved", 0.0)),
+            "income_change_total": float(metrics.get("income_change_total", 0.0)),
+            "monthly_emi": metrics.get("monthly_emi"),
+            "remaining_loan_principal": metrics.get("remaining_loan_principal"),
         },
         "simulation": {
             "n_runs": int(sim.get("n_runs", 0)),
@@ -291,6 +312,7 @@ def to_api_result(raw: Dict[str, Any]) -> Dict[str, Any]:
         },
         "cash_flow": {
             "months": months,
+            "projected": [i in set(raw.get("projected_months") or []) for i in range(len(months))],
             "inflows": [float(s.get("inflow", 0.0)) for s in schedules],
             "purchase_cash_out": [float(s.get("purchase_cash_out", 0.0)) for s in schedules],
             "categories": categories,

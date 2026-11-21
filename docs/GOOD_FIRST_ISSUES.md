@@ -1,30 +1,30 @@
 # 🌟 FutureFork Good First Issues
 
-Beginner-friendly and intermediate issues across the engine, AI layer, backend and frontend. Several are real bugs found while connecting the UI to the live engine.
+Beginner-friendly and intermediate issues across the engine, AI layer, backend and frontend. Several come from known limits of the current prototype.
 
 ---
 
-### 1. 🐛 Explainer drops the minus sign on negative balances
-- **Area**: `ai/agents/explainer.py`
+### 1. 💱 Currency awareness
+- **Area**: `data/normalize.py`, `ai/agents/explainer.py`, `frontend/`
 - **Difficulty**: Beginner
-- **Problem**: For an unaffordable plan, the template explanation says "min balance=₹17.62L" when the balance is **-₹17.62L**. The Numeric Guard compares absolute values, so it doesn't catch this.
-- **Definition of Done**: Negative balances render with a minus sign, and the guard rejects a sign mismatch. Add a test in `ai/evals/test_prompts.py`.
+- **Problem**: Files in $, € or £ are detected (`raw_metadata["currency"]`) but every amount is still shown with ₹.
+- **Definition of Done**: The detected currency symbol is used throughout the UI and explanations.
 
 ---
 
-### 2. 🐛 Parser misses "keeping ₹X in reserve"
-- **Area**: `ai/agents/parser.py`
-- **Difficulty**: Beginner
-- **Problem**: *"Buy ₹12L of GPU servers on EMI while keeping ₹20L in reserve"* parses the emergency floor as ₹0. Only phrasings like "without dropping below ₹X" are recognised.
-- **Definition of Done**: "keeping/keep/maintain ₹X in reserve/savings/the bank" sets the floor. Add regression prompts to the eval suite.
-
----
-
-### 3. ⚖️ Let Trim & Buy choose its purchase month
-- **Area**: `engine/solver.py` (`solve_trim_branch`)
+### 2. 🧩 Prompts with two decisions
+- **Area**: `ai/agents/parser.py`, `engine/`
 - **Difficulty**: Intermediate
-- **Problem**: Trim always buys in the target month, while Upfront may move the purchase to a safer month, so Trim can end up worse than Upfront (for example, the ₹2L vacation on the personal sample).
-- **Definition of Done**: Trim jointly optimizes purchase month and cuts. Test: Trim's minimum balance is never below Upfront's for the same goal.
+- **Problem**: *"Sell my old car for 3L and buy a new one for 8L"* models only the sale.
+- **Definition of Done**: Combined decisions are parsed into a list of changes and evaluated together.
+
+---
+
+### 3. 📅 Start the horizon from today
+- **Area**: `data/ingestor.py`, `ai/agents/parser.py`
+- **Difficulty**: Intermediate
+- **Problem**: The 12-month view replays the calendar months of the uploaded data, so "next month" means the second month of the data, not next month from today.
+- **Definition of Done**: The horizon starts at the current month, using the history's seasonality for each calendar month.
 
 ---
 

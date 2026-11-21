@@ -54,115 +54,6 @@ class MappingResult:
 
 
 # ---------------------------------------------------------------------------
-# Heuristic helpers
-# ---------------------------------------------------------------------------
-
-_PERSONAL_HEADERS = {"date", "narration", "category", "debit", "credit", "balance"}
-_INSTITUTE_HEADERS = {"voucher_no", "date", "account_head", "department", "narration", "debit", "credit"}
-_STARTUP_HEADERS = {"date", "description", "category", "amount", "type"}
-
-
-def _lower_set(headers: List[str]) -> Dict[str, str]:
-    """Return {lowercase_header: original_header} mapping."""
-    return {h.lower(): h for h in headers}
-
-
-def _detect_dataset_type(headers: List[str]) -> str:
-    """Detect dataset type from header set."""
-    lower_hdrs = set(h.lower() for h in headers)
-
-    # Score overlap with each known schema
-    personal_score = len(lower_hdrs & _PERSONAL_HEADERS)
-    institute_score = len(lower_hdrs & _INSTITUTE_HEADERS)
-    startup_score = len(lower_hdrs & _STARTUP_HEADERS)
-
-    # Distinct discriminators
-    if "account_head" in lower_hdrs or "voucher_no" in lower_hdrs or "department" in lower_hdrs:
-        return "institute"
-    if "type" in lower_hdrs and "amount" in lower_hdrs and "description" in lower_hdrs:
-        return "startup"
-    if "narration" in lower_hdrs and "balance" in lower_hdrs:
-        return "personal"
-
-    # Fallback to max score
-    scores = {"personal": personal_score, "institute": institute_score, "startup": startup_score}
-    best = max(scores, key=scores.get)
-    if scores[best] == 0:
-        return "unknown"
-    return best
-
-
-def _regex_mapping(
-    headers: List[str],
-    dataset_type: str,
-    dataset_type_hint: Optional[str],
-) -> tuple[ColumnMapping, float]:
-    """
-    Build a ColumnMapping deterministically from headers.
-
-    Returns:
-        (ColumnMapping, confidence)  — confidence 0.0–1.0
-    """
-    hmap = _lower_set(headers)  # {lower: original}
-    dtype = dataset_type_hint or dataset_type
-
-    def pick(*candidates: str) -> Optional[str]:
-        """Return the first candidate found in headers (case-insensitive)."""
-        for c in candidates:
-            orig = hmap.get(c.lower())
-            if orig is not None:
-                return orig
-        return None
-
-    # Date column
-    date_col = pick("date", "txn_date", "transaction_date", "value_date") or headers[0]
-
-    if dtype == "institute":
-        mapping = ColumnMapping(
-            date_col=date_col,
-            amount_col=None,
-            debit_col=pick("debit", "withdrawal", "expense"),
-            credit_col=pick("credit", "deposit", "income"),
-            category_col=pick("account_head", "account", "category"),
-            description_col=pick("narration", "description", "particulars", "remarks"),
-            type_col=None,
-            date_format=pick("date_format") and None or "%d/%m/%Y",
-            starting_balance=0.0,
-        )
-        confidence = 0.95 if pick("account_head") and pick("narration") else 0.75
-
-    elif dtype == "startup":
-        mapping = ColumnMapping(
-            date_col=date_col,
-            amount_col=pick("amount", "value"),
-            debit_col=None,
-            credit_col=None,
-            category_col=pick("category", "account_head"),
-            description_col=pick("description", "narration", "particulars"),
-            type_col=pick("type", "txn_type", "transaction_type"),
-            date_format=None,
-            starting_balance=0.0,
-        )
-        confidence = 0.95 if pick("amount") and pick("type") else 0.70
-
-    else:  # personal (default)
-        mapping = ColumnMapping(
-            date_col=date_col,
-            amount_col=None,
-            debit_col=pick("debit", "withdrawal", "expense"),
-            credit_col=pick("credit", "deposit", "income"),
-            category_col=pick("category", "account_head"),
-            description_col=pick("narration", "description", "particulars"),
-            type_col=None,
-            date_format=None,
-            starting_balance=0.0,
-        )
-        confidence = 0.95 if pick("debit") and pick("credit") else 0.70
-
-    return mapping, confidence
-
-
-# ---------------------------------------------------------------------------
 # LLM-tier helpers
 # ---------------------------------------------------------------------------
 
@@ -288,63 +179,54 @@ def propose_mapping(
     dataset_type_hint: Optional[str] = None,
 ) -> MappingResult:
     """
-    Propose a ColumnMapping from CSV headers and up to 3 sample rows.
+    Propose a ColumnMapping from CSV headers and sample rows.
 
-    Tier 1 (LLM): Send headers + ≤3 rows to the LLM. Validate response.
-    Tier 2 (regex): Deterministic heuristic fallback.
+    Tier 1 (LLM, optional): headers + up to 3 rows. Only columns that exist are accepted.
+    Tier 2 (deterministic): data.normalize.detect_columns on headers AND values. It also
+    fills any role the LLM left empty (e.g. the running-balance column).
 
     Args:
-        headers:           List of CSV column header strings.
-        sample_rows:       Up to 3 sample rows (list of lists or list of dicts).
-        dataset_type_hint: Optional hint ("personal"|"institute"|"startup").
-
-    Returns:
-        MappingResult with mapping, confidence, dataset_type, tier_used.
+        headers:           Column headers (already cleaned by data.normalize.load_table).
+        sample_rows:       Sample rows (dicts keyed by header, or lists in header order).
+        dataset_type_hint: Optional "personal" | "institute" | "startup".
     """
+    import pandas as pd
+
+    from data.normalize import detect_columns, detect_dataset_type
+
     if not headers:
-        # Degenerate case
-        return MappingResult(
-            mapping=ColumnMapping(),
-            confidence=0.0,
-            dataset_type="unknown",
-            tier_used="regex",
-        )
+        return MappingResult(mapping=ColumnMapping(), confidence=0.0, dataset_type="personal", tier_used="regex")
 
-    dataset_type = dataset_type_hint or _detect_dataset_type(headers)
+    rows = [r if isinstance(r, dict) else dict(zip(headers, r)) for r in sample_rows]
+    df = pd.DataFrame(rows, columns=headers, dtype=object).fillna("")
+    detection = detect_columns(df)
+    dataset_type = dataset_type_hint or detect_dataset_type(df, detection.mapping)
 
-    # ---- Tier 1: LLM -------------------------------------------------------
-    llm_raw = _call_llm_for_mapping(headers, sample_rows)
+    llm_raw = _call_llm_for_mapping(headers, rows[:3])
     if llm_raw is not None:
         validated = _validate_llm_mapping(llm_raw, headers)
         if validated is not None:
+            det = detection.mapping
             mapping = ColumnMapping(
-                date_col=validated.get("date_col") or headers[0],
+                date_col=validated.get("date_col") or det.date_col,
                 amount_col=validated.get("amount_col"),
                 debit_col=validated.get("debit_col"),
                 credit_col=validated.get("credit_col"),
-                category_col=validated.get("category_col"),
-                description_col=validated.get("description_col"),
-                type_col=validated.get("type_col"),
+                category_col=validated.get("category_col") or det.category_col,
+                description_col=validated.get("description_col") or det.description_col,
+                type_col=validated.get("type_col") or det.type_col,
+                balance_col=det.balance_col,
                 date_format=validated.get("date_format"),
                 starting_balance=0.0,
             )
+            if not (mapping.amount_col or mapping.debit_col or mapping.credit_col):
+                mapping.amount_col, mapping.debit_col, mapping.credit_col = det.amount_col, det.debit_col, det.credit_col
             logger.info("mapper: used LLM tier (dataset_type=%s)", dataset_type)
-            return MappingResult(
-                mapping=mapping,
-                confidence=0.88,
-                dataset_type=dataset_type,
-                tier_used="llm",
-            )
-        logger.info("mapper: LLM mapping validation failed, falling back to regex tier.")
-    else:
-        logger.debug("mapper: LLM unavailable or offline, using regex tier.")
+            return MappingResult(mapping=mapping, confidence=max(0.88, detection.confidence),
+                                 dataset_type=dataset_type, tier_used="llm")
+        logger.info("mapper: LLM mapping validation failed, using deterministic detection.")
 
-    # ---- Tier 2: Regex/heuristic -------------------------------------------
-    mapping, confidence = _regex_mapping(headers, dataset_type, dataset_type_hint)
-    logger.info("mapper: used regex tier (dataset_type=%s, confidence=%.2f)", dataset_type, confidence)
-    return MappingResult(
-        mapping=mapping,
-        confidence=confidence,
-        dataset_type=dataset_type,
-        tier_used="regex",
-    )
+    logger.info("mapper: used deterministic detection (dataset_type=%s, confidence=%.2f)",
+                dataset_type, detection.confidence)
+    return MappingResult(mapping=detection.mapping, confidence=detection.confidence,
+                         dataset_type=dataset_type, tier_used="regex")

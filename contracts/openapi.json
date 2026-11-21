@@ -526,6 +526,14 @@
             "type": "array",
             "title": "Months"
           },
+          "projected": {
+            "items": {
+              "type": "boolean"
+            },
+            "type": "array",
+            "title": "Projected",
+            "description": "True for months projected from averages"
+          },
           "inflows": {
             "items": {
               "type": "number"
@@ -562,7 +570,7 @@
           "type": {
             "type": "string",
             "title": "Type",
-            "description": "baseline | upfront | emi | phased | trim"
+            "description": "baseline, or a fork type: upfront | emi | phased | trim | absorb | delay | phase_in"
           },
           "params": {
             "additionalProperties": true,
@@ -625,6 +633,18 @@
             ],
             "title": "Dataset Type",
             "description": "personal | institute | startup (defaults to the type detected at inspect)"
+          },
+          "monthly_income": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monthly Income",
+            "description": "Monthly income (\u20b9). Use when the file has no income rows, e.g. an expenses-only export."
           }
         },
         "type": "object",
@@ -784,6 +804,35 @@
           "total_trims_saved": {
             "type": "number",
             "title": "Total Trims Saved"
+          },
+          "income_change_total": {
+            "type": "number",
+            "title": "Income Change Total",
+            "description": "Change in total income over the horizon (\u20b9)",
+            "default": 0.0
+          },
+          "monthly_emi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monthly Emi"
+          },
+          "remaining_loan_principal": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remaining Loan Principal",
+            "description": "Loan principal still owed after 12 months (\u20b9)"
           }
         },
         "type": "object",
@@ -828,7 +877,10 @@
               "upfront",
               "emi",
               "phased",
-              "trim"
+              "trim",
+              "absorb",
+              "delay",
+              "phase_in"
             ],
             "title": "Branch Type"
           },
@@ -842,6 +894,18 @@
               }
             ],
             "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "What this fork did, e.g. the start month the solver chose"
           },
           "is_feasible": {
             "type": "boolean",

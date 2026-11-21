@@ -17,13 +17,13 @@
 
 ## 🌟 What is FutureFork?
 
-Big purchases are where cash-flow plans quietly break. A college buys 40 GPU lab PCs, a startup hires two senior engineers, a person takes a ₹1.2L laptop on EMI, and three months later the reserve is gone because a fee payment came in late.
+Big money decisions are where cash-flow plans quietly break. A college buys 40 GPU lab PCs, a startup hires two senior engineers, a person takes a ₹1.2L laptop on EMI or loses their job for three months, and the reserve is gone before anyone noticed.
 
-**FutureFork** turns a plain-English spending decision into a set of financially rigorous alternatives, evaluated against **your own transaction history**:
+**FutureFork** turns a plain-English money decision into a set of financially rigorous alternatives, evaluated against **your own transaction history**:
 
-1. **Upload a CSV**: a bank or UPI statement, an institute ERP ledger, or a startup P&L. FutureFork proposes a column mapping, you confirm it, and it compiles a 12-month cash-flow baseline (**Node 0**).
-2. **Describe the decision**: *"Buy 40 GPU lab PCs for ₹60L without dropping below ₹25L treasury reserve."* Indian notation (₹, lakh, crore, k) is understood natively.
-3. **Fork into four strategies**: the decision is branched into competing ways to pay for it (Upfront, EMI, Phased, Trim & Buy).
+1. **Upload your data**: a bank or UPI statement, an institute ERP ledger, or a startup P&L, as CSV, TSV or Excel. FutureFork reads most real exports as they are (see [What files work](#-what-files-work)), proposes a column mapping, and compiles a 12-month cash-flow baseline (**Node 0**).
+2. **Describe the decision** in plain English: *"Buy 40 GPU lab PCs for ₹60L without dropping below ₹25L"*, *"Hire 2 engineers at 20L per year each"*, *"What if my salary drops 20% for 6 months?"*. Indian notation (₹, lakh, crore, k, "50 hazar") is understood, and FutureFork shows you what it understood before solving.
+3. **Fork into strategies**: the decision is branched into competing options that fit its kind (see [Decisions and forks](#-decisions-and-forks)).
 4. **Solve and stress-test**: Google OR-Tools CP-SAT finds the best schedule for each fork that respects your emergency floor. A vectorized NumPy Monte Carlo engine then replays it 300 times under shocks such as late income, emergency expenses and spending drift.
 5. **Compare and decide**: explore the forks on an interactive scenario tree, inspect month-by-month cash-flow matrices, and read an AI explanation whose numbers are verified against the engine output.
 
@@ -33,7 +33,7 @@ Big purchases are where cash-flow plans quietly break. A college buys 40 GPU lab
 |---|---|---|
 | **Individual** | Bank / UPI statement | *"Buy a ₹1.2L laptop on 12-month EMI without dropping below ₹30k emergency savings"* |
 | **Institute** | College ERP expense ledger | *"Buy 40 GPU lab PCs for ₹60L without dropping below ₹25L treasury reserve"* |
-| **Startup** | P&L / burn CSV | *"Hire 2 senior engineers at ₹20L/yr CTC each without extending runway below 6 months"* |
+| **Startup** | P&L / burn CSV | *"Hire 2 engineers at 20L per year each"*, *"What if revenue falls 30% for 3 months?"* |
 
 ### 🛡️ The Golden Rule
 
@@ -42,16 +42,27 @@ Big purchases are where cash-flow plans quietly break. A college buys 40 GPU lab
 
 ---
 
-## 🍴 The Four Forks
+## 🍴 Decisions and Forks
 
-Every decision is evaluated against **Node 0 (Baseline)**, your historical 12-month trajectory with no purchase, and four strategies:
+Every decision is evaluated against **Node 0 (Baseline)**, your historical 12-month trajectory with no change, plus forks that depend on the kind of decision:
 
-| Fork | Strategy | What the solver decides |
+| Kind | Examples | Forks |
 |---|---|---|
-| **A: Upfront** | Pay 100% in one month, zero interest | The earliest month the full payment fits without breaching the emergency floor |
-| **B: EMI / Lease** | Spread the cost over 3–12 instalments with an annual financing rate | Instalment schedule, optional down payment, and total interest cost |
-| **C: Phased** | Split the purchase into milestones (default 50/50) with no debt | Tranche timing aligned with inflow peaks |
-| **D: Trim & Buy** | Cut flexible spending categories (capped, default 35%) | The minimum-pain cut per flexible category. Fixed categories such as salaries, rent and utilities are never touched |
+| **One-time cost** | buy a car, a trip, pay off a debt, save ₹3L by March | Upfront, EMI, Phased, Trim & Buy |
+| **Recurring cost** | hire engineers, a subscription, higher rent, a SIP | As Planned, Delay the Start, Phase It In, Trim to Fund It |
+| **Income change** | pay cut, job loss, a raise, revenue drop, a one-off bonus or sale | Ride It Out, Trim Spending |
+
+| Fork | What the solver decides |
+|---|---|
+| **Upfront** | The earliest month the full payment fits without breaching the emergency floor (zero interest) |
+| **EMI / Loan** | Instalment schedule with interest and optional down payment. Loans longer than 12 months use the standard reducing-balance EMI and report the principal still owed after the 12 months |
+| **Phased** | 50/50 tranches, with the earliest safe month for the first one |
+| **Trim & Buy / Trim to Fund It / Trim Spending** | The minimum-pain cut per flexible category (capped at 35%). Fixed categories such as salaries, rent and utilities are never touched |
+| **As Planned / Ride It Out** | The change exactly as described, with no other adjustments |
+| **Delay the Start** | The earliest start month that keeps you above the floor |
+| **Phase It In** | 50% of the recurring cost for the first 3 months, then the full amount |
+
+The parser understands the amount, the minimum balance ("without dropping below ₹1L", "keeping ₹20L in reserve", "minimum balance of 40k"), timing ("next month", "in December", "in 2 months"), duration ("for 3 months"), per-month and per-year amounts, quantities ("2 engineers at 20L each"), loan tenure, down payment and interest rate. If an amount is missing, it asks for it; prompts that aren't about money are politely declined.
 
 ### Metrics per fork
 
@@ -73,6 +84,25 @@ All metrics come from [`engine/metrics.py`](engine/metrics.py) and [`engine/simu
 
 ---
 
+## 📄 What Files Work
+
+FutureFork reads real exports as they are, with no reformatting needed:
+
+- **Formats**: CSV, TSV, semicolon- or pipe-separated text, and Excel `.xlsx` (old `.xls`: save as `.xlsx` or `.csv`)
+- **Bank export quirks**: account-info lines above the header, totals rows, padded or messy headers
+- **Amount styles**: one signed amount column, separate debit/credit or withdrawal/deposit columns, an amount plus a Dr/Cr or Income/Expense type column, or "Dr"/"Cr" written after each value
+- **Number formats**: ₹, Rs., $, Indian grouping (1,23,456.78), European decimals (1.234,56) and negatives in brackets
+- **Dates**: day-first and month-first (detected per file), "01 Apr 2024", "Apr-2024" and ISO dates
+- **Opening balance**: inferred from a running-balance column when present; otherwise you can enter it
+- **History length**: the latest 12 months are used. Shorter files are projected forward from your average monthly income and spending, and projected months are marked with `*` in the UI
+- **Expenses-only files**: enter your monthly income at upload
+
+Anything FutureFork had to assume is shown under **About your data** before you decide.
+
+**Known limits**: amounts in other currencies are used as-is and shown with ₹ (a warning is shown); a prompt with two decisions ("sell my car and buy a new one") models only the first; the 12-month view replays the calendar months of your data rather than starting from today.
+
+---
+
 ## 🏗️ System Architecture
 
 ```
@@ -80,7 +110,7 @@ All metrics come from [`engine/metrics.py`](engine/metrics.py) and [`engine/simu
 |                        FRONTEND (React 18 + TypeScript + Vite)                  |
 |   - UploadIngestor: CSV upload, column-mapping review, Node 0 commit            |
 |   - DecisionInput: plain-English decision prompt                                |
-|   - ScenarioTree: baseline + 4 fork cards with live solve status                |
+|   - ScenarioTree: baseline + fork cards with live solve status                  |
 |   - CashFlowMatrix: month-by-month balances vs. emergency floor                 |
 |   - ComparisonDashboard: 4-fork side-by-side risk & cost comparison             |
 |   - ExplanationPanel: AI narrative checked by the Numeric Guard                 |
@@ -95,7 +125,7 @@ All metrics come from [`engine/metrics.py`](engine/metrics.py) and [`engine/simu
                      |                                    |
 +--------------------v-------------+     +----------------v-----------------------+
 |          AI LAYER                |     |   OPTIMIZATION & SIMULATION ENGINE     |
-|   - Mapper: CSV column mapping   |     |   - Ingestor: CSV -> 12-month instance |
+|   - Mapper: CSV column mapping   |     |   - Ingestor: any CSV/Excel -> 12 mo.  |
 |   - Parser: ₹ / lakh / crore NLP |     |   - Change appliers: 4 fork transforms |
 |   - Scenario: 4-fork (LangGraph) |     |   - CP-SAT cash-flow solver            |
 |   - Explainer + Numeric Guard    |     |   - Vectorized NumPy Monte Carlo (300) |
@@ -118,7 +148,7 @@ All metrics come from [`engine/metrics.py`](engine/metrics.py) and [`engine/simu
 | Step | Endpoint | What happens |
 |---|---|---|
 | 0 | `GET /datasets` | List datasets, including the three bundled samples seeded on startup |
-| 1 | `POST /datasets/inspect` | Upload a CSV. Returns the proposed column mapping, a 5-row preview and an `upload_id` (15-minute TTL) |
+| 1 | `POST /datasets/inspect` | Upload a CSV/TSV/Excel file (up to 10 MB). Returns the proposed column mapping, a 5-row preview, warnings and an `upload_id` (15-minute TTL) |
 | 2 | `POST /datasets/commit` | Confirm or edit the mapping. Compiles the 12-month **Node 0** baseline |
 | 3 | `POST /decisions` | Parse the plain-English decision into a structured spec |
 | 4 | `POST /decisions/{id}/scenarios` | Generate the baseline plus the 4 forks |
@@ -235,9 +265,9 @@ cd frontend && pnpm run build
 
 ## 🧩 Adding a New Fork Type
 
-1. **Transformer** ([`engine/changes.py`](engine/changes.py)): add `apply_<fork>(instance, goal, params)` that returns a modified `PurchaseGoal`. Add the fork to `BRANCH_TYPES`, `_BRANCH_ALIASES` and the `appliers` map in `apply_financial_change`.
+1. **Transformer** ([`engine/changes.py`](engine/changes.py)): add `apply_<fork>(instance, goal, params)` that returns a modified `PurchaseGoal`. Add the fork to `BRANCH_TYPES`, `_BRANCH_ALIASES`, the `appliers` map in `apply_financial_change`, and the decision kinds it applies to in `FORKS_BY_KIND`.
 2. **Solver** ([`engine/solver.py`](engine/solver.py)): add `solve_<fork>_branch(instance, goal)` that builds the CP-SAT model, and dispatch to it from `solve_financial_scenario`. `evaluate_financial_branch` then runs the Monte Carlo step automatically.
-3. **Scenario agent** ([`ai/agents/scenario.py`](ai/agents/scenario.py)): add the fork to `_FORK_METADATA` and the fan-out list.
+3. **Scenario agent** ([`ai/agents/scenario.py`](ai/agents/scenario.py)): add a `(decision_kind, fork)` entry to `_FORK_METADATA`.
 4. **Parser** ([`ai/agents/parser.py`](ai/agents/parser.py)): teach it the keywords that indicate the new financing preference.
 5. **Explainer** ([`ai/agents/explainer.py`](ai/agents/explainer.py)): make sure the fork's metrics are added to the Numeric Guard's allowed facts.
 6. **Contracts & UI**: add the branch to `BranchType` in [`contracts/schemas.py`](contracts/schemas.py) and both `types.ts` copies, and give it a colour and label in `ScenarioTree.tsx`, `ComparisonDashboard.tsx` and `ExplanationPanel.tsx`.
@@ -267,7 +297,8 @@ futurefork/
 │   └── tests/                   # API tests
 ├── contracts/                   # API schemas (Pydantic), TypeScript mirror, OpenAPI
 ├── data/
-│   ├── ingestor.py              # CSV -> 12-month FinancialProblemInstance
+│   ├── normalize.py             # Read any CSV/Excel, detect columns, parse amounts & dates
+│   ├── ingestor.py              # Table -> 12-month FinancialProblemInstance
 │   ├── make_finance_samples.py  # Sample CSV generator
 │   └── samples/                 # Personal, institute & startup CSVs
 ├── engine/                      # Optimization & simulation engine

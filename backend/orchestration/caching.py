@@ -9,7 +9,7 @@ import json
 from typing import Any, Dict
 
 # Bump when the stored engine result format changes so stale entries are never reused.
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 
 
 def compute_cache_key(

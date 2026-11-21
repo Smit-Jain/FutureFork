@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, BarChart3, Circle, GitBranch, Layers, RotateCcw, Sparkles, Upload } from 'lucide-react';
+import { Activity, AlertTriangle, BarChart3, Circle, GitBranch, Layers, RotateCcw, Sparkles, Upload } from 'lucide-react';
 import { api, isMockMode } from './api/client';
 import {
   DatasetType,
@@ -22,6 +22,7 @@ interface ActiveDataset {
   id: string;
   name: string;
   type: DatasetType;
+  warnings: string[];
 }
 
 const POLL_MS = 1000;
@@ -106,8 +107,8 @@ export const App: React.FC = () => {
     setRunProgress(0);
   };
 
-  const handleDatasetReady = (id: string, name: string, type: DatasetType) => {
-    setDataset({ id, name, type });
+  const handleDatasetReady = (id: string, name: string, type: DatasetType, warnings: string[]) => {
+    setDataset({ id, name, type, warnings });
     clearDecision();
     setPromptText(EXAMPLE_PROMPTS[type][0]);
     setTab('fork');
@@ -258,6 +259,16 @@ export const App: React.FC = () => {
                 </label>
               )}
             </div>
+
+            {dataset.warnings.length > 0 && (
+              <div className="flex items-start gap-2 px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
+                <div className="space-y-1">
+                  <div className="font-semibold text-amber-300">About your data</div>
+                  {dataset.warnings.map((w) => <div key={w}>{w}</div>)}
+                </div>
+              </div>
+            )}
 
             <DecisionInput
               promptText={promptText}

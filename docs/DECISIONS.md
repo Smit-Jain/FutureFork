@@ -41,3 +41,10 @@
 - **Context**: The backend bridge returned hardcoded metrics (for example "28% cash-out risk") whenever the engine raised. That broke ADR 001 without anyone noticing, and lenient tests accepted it.
 - **Decision**: Engine failures propagate. The runner marks that scenario `failed`, and the other forks still run. Tests assert that results come from the engine.
 - **Consequence**: Bad inputs and engine bugs become visible in the UI and in CI instead of being hidden behind plausible-looking numbers.
+
+## ADR 007: Any File, Any Prompt
+- **Date**: 2026-11-21
+- **Status**: Accepted
+- **Context**: Real exports vary widely (delimiters, bank preambles, Dr/Cr markers, Indian and European number formats, short histories), and real decisions are not all one-time purchases.
+- **Decision**: One shared reader (`data/normalize.py`) detects columns from headers and values for both inspect and commit. Decisions are classified as `one_time`, `recurring_expense` or `income_change`, each with its own forks (`engine.changes.FORKS_BY_KIND`); recurring costs and income changes are applied to a copy of the baseline and solved with the same engine. The parser always returns a plain-English "understood" summary, asks a specific question when an amount is missing, and declines off-topic prompts.
+- **Consequence**: Assumptions (inferred opening balance, projected months, skipped rows, currency) are surfaced to the user as warnings instead of being hidden. Short histories are projected from averages rather than zero-filled.

@@ -288,24 +288,35 @@ def solve_emi_branch(
     start_t = time.perf_counter()
 
     T = 12
-    N = max(2, min(12, int(goal.emi_months or 6)))
-    r_annual = float(goal.interest_rate_annual or 0.10)
+    N = max(2, int(goal.emi_months or 6))
+    r_annual = float(goal.interest_rate_annual if goal.interest_rate_annual is not None else 0.10)
     down = float(goal.downpayment or 0.0)
     principal = max(0.0, goal.total_cost - down)
+    long_loan = N > T
 
-    # Flat or simple interest over N months tenure
-    interest_total = round(principal * r_annual * (N / 12.0), 2)
-    monthly_emi = round((principal + interest_total) / N, 2)
+    if long_loan:
+        # Reducing-balance (amortising) EMI for loans longer than the 12-month horizon.
+        r = r_annual / 12.0
+        monthly_emi = round(principal / N if r == 0 else principal * r * (1 + r) ** N / ((1 + r) ** N - 1), 2)
+        interest_total = round(monthly_emi * N - principal, 2)
+    else:
+        # Flat interest over the tenure (typical short consumer EMI)
+        interest_total = round(principal * r_annual * (N / 12.0), 2)
+        monthly_emi = round((principal + interest_total) / N, 2)
     down_int = int(round(down))
     emi_int = int(round(monthly_emi))
 
-    target_m = max(0, min(T - N, goal.target_month))
+    # Short EMIs: CP-SAT picks the start month s in [0, 12 - N].
+    # Long loans start when the purchase is made (moving them can't help within 12 months).
+    target_m = max(0, min(T - 1 if long_loan else T - N, goal.target_month))
 
-    # CP-SAT Model to optimize start month s in [0, 12 - N]
     model = cp_model.CpModel()
-    max_s = T - N
+    max_s = target_m if long_loan else T - N
     s_vars = [model.NewBoolVar(f"start_m{s}") for s in range(max_s + 1)]
     model.AddExactlyOne(s_vars)
+    if long_loan:
+        for s_idx in range(max_s):
+            model.Add(s_vars[s_idx] == 0)
 
     inflows_int = [int(round(x)) for x in instance.inflows]
     outflows_int = [int(round(x)) for x in instance.total_outflows]
@@ -406,6 +417,18 @@ def solve_emi_branch(
         total_interest=interest_total,
         total_saved=0.0,
     )
+    paid_in_horizon = sum(1 for t in range(T) if start_m <= t < start_m + N)
+    remaining_principal = 0.0
+    if long_loan and principal > 0:
+        r = r_annual / 12.0
+        k = paid_in_horizon
+        remaining_principal = (
+            principal - monthly_emi * k if r == 0
+            else principal * (1 + r) ** k - monthly_emi * ((1 + r) ** k - 1) / r
+        )
+    metrics["monthly_emi"] = monthly_emi
+    metrics["emi_months"] = N
+    metrics["remaining_loan_principal"] = round(max(0.0, remaining_principal), 2)
 
     elapsed = time.perf_counter() - start_t
 
@@ -468,6 +491,8 @@ def solve_phased_branch(
     c2 = int(round(C * pct2))
 
     # Phase 2 timing variable: v[k] = 1 for month k in [1, 11]
+    # Phase 1 must leave at least one later month for phase 2
+    m1 = max(0, min(m1, T - 2))
     # Restrict k > m1
     valid_k = list(range(max(1, m1 + 1), T))
     v_vars = {k: model.NewBoolVar(f"phase2_m{k}") for k in valid_k}
@@ -898,6 +923,118 @@ def attach_simulation(
     return result
 
 
+_FORK_LABELS = {
+    "absorb": ("Commit As Planned", "Take on the change from the planned month with no other adjustments."),
+    "delay": ("Delay the Start", "Start at the earliest month that keeps your balance above the emergency floor."),
+    "phase_in": ("Phase It In", "Start at 50% for the first 3 months, then the full amount."),
+    "trim": ("Trim to Fund It", "Cut flexible spending (up to the trim cap) to keep the balance above the floor."),
+}
+
+
+def _evaluate_adjusted_fork(
+    instance: FinancialProblemInstance,
+    b_type: str,
+    goal: PurchaseGoal,
+):
+    """Evaluates a recurring-expense or income-change fork. Returns (result, adjusted_instance)."""
+    import copy as _copy
+
+    from engine.changes import adjust_instance, recurring_schedule
+
+    floor = goal.emergency_floor
+    kind = goal.decision_kind
+    chosen_start = goal.start_month
+    solver_name = "Deterministic-Audit"
+
+    if kind == "recurring_expense" and b_type == "delay":
+        best = None
+        for start in range(max(0, goal.start_month), 12):
+            adj_s = adjust_instance(instance, goal, recurring_schedule(goal, start_month=start))
+            res_s = evaluate_financial_baseline(adj_s, floor)
+            key = (res_s.metrics["months_below_floor"], -res_s.metrics["lowest_balance"])
+            if best is None or key < best[0]:
+                best = (key, start, res_s, adj_s)
+            if res_s.metrics["months_below_floor"] == 0:
+                best = (key, start, res_s, adj_s)
+                break
+        _, chosen_start, result, adj = best
+        solver_name = "Exhaustive-Search"
+        schedule = recurring_schedule(goal, start_month=chosen_start)
+    else:
+        if kind == "recurring_expense":
+            schedule = recurring_schedule(goal, phase_in=(b_type == "phase_in"))
+            adj = adjust_instance(instance, goal, schedule)
+        else:
+            schedule = [0.0] * 12
+            adj = adjust_instance(instance, goal)
+        if b_type == "trim":
+            trim_goal = _copy.deepcopy(goal)
+            trim_goal.total_cost = 0.0
+            trim_goal.target_month = goal.start_month
+            trim_goal.flexible_categories = [c for c, t in adj.category_types.items() if t == "flexible"]
+            result = solve_trim_branch(adj, trim_goal)
+        else:
+            result = evaluate_financial_baseline(adj, floor)
+
+    title, desc = _FORK_LABELS[b_type]
+    commitment = round(sum(schedule), 2)
+    result.scenario_id = f"branch_{b_type}"
+    result.scenario_name = title
+    result.description = desc
+    result.branch_type = b_type
+    result.purchase_month = chosen_start
+    result.total_purchase_cost = commitment
+    result.metrics["total_purchase_cost"] = commitment
+    result.metrics["income_change_total"] = round(sum(adj.inflows) - sum(instance.inflows), 2)
+    result.solver_metadata = {**result.solver_metadata, "solver": result.solver_metadata.get("solver", solver_name)}
+    if b_type == "delay":
+        result.solver_metadata["solver"] = solver_name
+        result.solver_metadata["chosen_start_month"] = chosen_start
+        month = instance.months[chosen_start] if chosen_start < len(instance.months) else f"month {chosen_start + 1}"
+        if result.metrics["months_below_floor"] == 0:
+            result.description = (
+                f"Earliest start that keeps you above the floor: month {chosen_start + 1} ({month}). "
+                f"Only {sum(1 for x in schedule if x)} month(s) of the cost fall inside this 12-month view."
+            )
+        else:
+            result.description = (
+                f"No start month keeps you above the floor; month {chosen_start + 1} ({month}) does least damage. "
+                "The cost continues after the 12 months shown."
+            )
+    result.is_feasible = result.metrics["months_below_floor"] == 0
+    return result, adj
+
+
+def _earliest_safe_month(
+    instance: FinancialProblemInstance,
+    goal: PurchaseGoal,
+    b_type: str,
+) -> ScenarioEvaluationResult:
+    """
+    Trim and phased forks are solved for a fixed first-payment month. Like the upfront and EMI
+    solvers, pick the earliest month (from the target onwards) that keeps the balance above the
+    floor; if none does, the month with the fewest breached months and the highest low point.
+    """
+    import copy as _copy
+
+    last = 11 if b_type == "trim" else 10
+    best = None
+    for month in range(max(0, min(goal.target_month, last)), last + 1):
+        g = _copy.deepcopy(goal)
+        g.target_month = month
+        if b_type == "phased":
+            g.phased_splits = [{"month": month, "pct": 0.5}, {"month": min(11, month + 5), "pct": 0.5}]
+        res = solve_financial_scenario(instance, g, branch_type=b_type)
+        key = (res.metrics["months_below_floor"], -res.metrics["lowest_balance"], res.total_trims_saved)
+        if best is None or key < best[0]:
+            best = (key, res)
+        if res.metrics["months_below_floor"] == 0 and res.metrics["lowest_balance"] >= 0:
+            break
+    result = best[1]
+    result.solver_metadata["searched_from_month"] = goal.target_month
+    return result
+
+
 def evaluate_financial_branch(
     instance: FinancialProblemInstance,
     branch_type: str,
@@ -908,25 +1045,40 @@ def evaluate_financial_branch(
     """
     Single public entry point used by the backend: evaluates ONE branch end to end.
 
-    - branch_type "baseline": Node 0 status quo (no purchase) against goal.emergency_floor.
-    - any fork type ("upfront" | "emi" | "phased" | "trim"): applies the fork transformer to
-      the goal, solves it with CP-SAT, then runs the Monte Carlo stress test.
-
+    - "baseline": the status quo (no decision applied) against the goal's emergency floor.
+    - one_time decisions: "upfront" | "emi" | "phased" | "trim" (fork transformer -> CP-SAT).
+    - recurring_expense decisions: "absorb" | "delay" | "phase_in" | "trim".
+    - income_change decisions: "absorb" | "trim".
+    Every branch is then stress-tested with the Monte Carlo simulator.
     Raises on invalid input instead of returning placeholder numbers.
     """
-    from engine.changes import apply_financial_change, normalize_branch_type
+    from engine.changes import FORKS_BY_KIND, apply_financial_change, normalize_branch_type
 
     g = goal if isinstance(goal, PurchaseGoal) else PurchaseGoal.from_dict(goal)
+    kind = g.decision_kind if g.decision_kind in FORKS_BY_KIND else "one_time"
+    g.decision_kind = kind
     b_type = (branch_type or "").lower()
     if b_type != "baseline":
         b_type = normalize_branch_type(b_type)
+        if b_type not in FORKS_BY_KIND[kind]:
+            raise ValueError(f"Fork '{b_type}' does not apply to a {kind.replace('_', ' ')} decision")
 
+    sim_instance = instance
     if b_type == "baseline":
         result = evaluate_financial_baseline(instance, g.emergency_floor)
-    else:
+    elif kind == "one_time":
         if g.total_cost <= 0:
             raise ValueError("Purchase goal total_cost must be > 0 to evaluate a fork")
         fork_goal = apply_financial_change(instance, {"type": b_type, "params": g.to_dict()}, g)
-        result = solve_financial_scenario(instance, fork_goal, branch_type=b_type)
+        if b_type in ("trim", "phased"):
+            result = _earliest_safe_month(instance, fork_goal, b_type)
+        else:
+            result = solve_financial_scenario(instance, fork_goal, branch_type=b_type)
+    else:
+        if kind == "recurring_expense" and g.monthly_amount <= 0:
+            raise ValueError("A recurring cost needs a monthly amount > 0")
+        if kind == "income_change" and not (g.income_change_pct or g.income_change_monthly):
+            raise ValueError("An income change needs a percentage or monthly amount")
+        result, sim_instance = _evaluate_adjusted_fork(instance, b_type, g)
 
-    return attach_simulation(result, instance, n_sims=n_sims, seed=seed)
+    return attach_simulation(result, sim_instance, n_sims=n_sims, seed=seed)

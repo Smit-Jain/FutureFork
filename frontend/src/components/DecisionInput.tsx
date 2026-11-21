@@ -1,19 +1,25 @@
 import React from 'react';
-import { AlertTriangle, Loader2, Sparkles, Zap } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Loader2, Sparkles, Zap } from 'lucide-react';
 import { DatasetType, DecisionSpec } from '../contracts/types';
 
 export const EXAMPLE_PROMPTS: Record<DatasetType, string[]> = {
   personal: [
     'Buy a ₹1.2L laptop on 12-month EMI without dropping below ₹30k emergency savings',
     'Take a ₹2L vacation without dropping below ₹50k reserve',
+    'Add a ₹15k/month gym subscription',
+    'What if my salary drops by 20% for 6 months?',
   ],
   institute: [
     'Buy 40 GPU lab PCs for ₹60L without dropping below ₹25L treasury reserve',
     'Upgrade server infrastructure for ₹18L without dropping below ₹20L reserve',
+    'Hire 3 faculty at ₹90k per month each',
+    'What if fee collections fall 15% next quarter?',
   ],
   startup: [
     'Run a ₹8L marketing campaign without dropping below ₹15L in the bank',
     'Buy ₹12L of GPU servers on EMI while keeping ₹20L in reserve',
+    'Hire 2 engineers at 20L per year each',
+    'What if revenue falls 30% for 3 months?',
   ],
 };
 
@@ -43,6 +49,7 @@ export const DecisionInput: React.FC<DecisionInputProps> = ({
   };
 
   const needsClarification = decisionSpec && decisionSpec.status !== 'ok';
+  const understood = decisionSpec?.status === 'ok' ? decisionSpec.understood : null;
 
   return (
     <form onSubmit={handleSubmit} className="glass-card p-5 space-y-4">
@@ -73,6 +80,13 @@ export const DecisionInput: React.FC<DecisionInputProps> = ({
           </button>
         ))}
       </div>
+
+      {understood && (
+        <div className="flex items-start gap-2 px-4 py-3 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-200 text-xs">
+          <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5 text-emerald-400" />
+          <span><span className="font-semibold text-emerald-300">Understood as:</span> {understood}</span>
+        </div>
+      )}
 
       {needsClarification && (
         <div className="flex items-start gap-2 px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs">

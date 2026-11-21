@@ -27,10 +27,10 @@
 
 ## Request flow
 
-1. `POST /datasets/inspect` reads the CSV and proposes a column mapping (mapper agent; regex fallback).
+1. `POST /datasets/inspect` reads the file with `data/normalize.py` (CSV/TSV/Excel, preamble lines, Dr/Cr markers, Indian/European numbers, day- or month-first dates) and proposes a column mapping from headers and values (mapper agent; deterministic fallback).
 2. `POST /datasets/commit` compiles the 12-month baseline (Node 0) and stores it with its Monte Carlo baseline metrics. Three sample datasets (`sample_personal`, `sample_institute`, `sample_startup`) are seeded on startup.
-3. `POST /decisions` parses the prompt into a purchase goal (cost, emergency floor, preference).
-4. `POST /decisions/{id}/scenarios` fans out into the baseline plus four forks. Scenario ids are `{decision_id}_{branch}`, so decisions never overwrite each other.
+3. `POST /decisions` parses the prompt into one of three decision kinds (one-time cost, recurring cost, income change) with amount, floor, timing and loan terms, plus a plain-English "understood" summary. Off-topic prompts return `unsupported`; missing amounts return `needs_clarification` with a specific question.
+4. `POST /decisions/{id}/scenarios` fans the stored decision out into the baseline plus the forks for its kind (`engine.changes.FORKS_BY_KIND`), without re-parsing the prompt. Scenario ids are `{decision_id}_{branch}`, so decisions never overwrite each other.
 5. `POST /decisions/{id}/run` evaluates each fork in a background thread: CP-SAT, then Monte Carlo. Results are cached by dataset, change, seed and run count.
 6. `GET /decisions/{id}/compare` returns every result in the `FinancialScenarioResult` contract plus an explanation that has passed the Numeric Guard.
 

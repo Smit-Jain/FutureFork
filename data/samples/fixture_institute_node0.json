@@ -254,10 +254,14 @@
     "dataset_id": "institute_erp_1.8cr",
     "name": "Apex Institute of Technology - Annual Operating Ledger (\u20b91.8 Cr)",
     "source_rows": 143,
+    "source_format": "csv",
     "date_range": [
       "2024-04",
       "2025-03"
     ],
+    "observed_months": 12,
+    "projected_months": [],
+    "currency": "INR",
     "detected_mapping": {
       "date_col": "Date",
       "amount_col": null,
@@ -266,8 +270,10 @@
       "category_col": "Account_Head",
       "description_col": "Narration",
       "type_col": null,
+      "balance_col": null,
       "date_format": "%d/%m/%Y",
       "starting_balance": 2500000.0
-    }
+    },
+    "warnings": []
   }
 }

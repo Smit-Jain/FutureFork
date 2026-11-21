@@ -12,8 +12,9 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-BranchType = Literal["baseline", "upfront", "emi", "phased", "trim"]
-DecisionStatus = Literal["ok", "needs_clarification"]
+BranchType = Literal["baseline", "upfront", "emi", "phased", "trim", "absorb", "delay", "phase_in"]
+DecisionKind = Literal["one_time", "recurring_expense", "income_change"]
+DecisionStatus = Literal["ok", "needs_clarification", "unsupported"]
 ScenarioStatus = Literal["queued", "running", "done", "failed"]
 CategoryType = Literal["fixed", "flexible"]
 
@@ -23,7 +24,7 @@ CategoryType = Literal["fixed", "flexible"]
 # ---------------------------------------------------------------------------
 
 class ChangeSpec(BaseModel):
-    type: str = Field(..., description="baseline | upfront | emi | phased | trim")
+    type: str = Field(..., description="baseline, or a fork type: upfront | emi | phased | trim | absorb | delay | phase_in")
     params: Dict[str, Any] = Field(default_factory=dict, description="PurchaseGoal fields")
 
 
@@ -69,6 +70,9 @@ class FinancialMetrics(BaseModel):
     total_purchase_cost: float
     total_financing_interest: float
     total_trims_saved: float
+    income_change_total: float = Field(0.0, description="Change in total income over the horizon (₹)")
+    monthly_emi: Optional[float] = None
+    remaining_loan_principal: Optional[float] = Field(None, description="Loan principal still owed after 12 months (₹)")
 
 
 class MetricDistribution(BaseModel):
@@ -95,6 +99,7 @@ class CashFlowCategory(BaseModel):
 
 class CashFlowMatrix(BaseModel):
     months: List[str]
+    projected: List[bool] = Field(default_factory=list, description="True for months projected from averages")
     inflows: List[float]
     purchase_cash_out: List[float]
     categories: List[CashFlowCategory]
@@ -105,6 +110,7 @@ class FinancialScenarioResult(BaseModel):
     decision_id: Optional[str] = None
     branch_type: BranchType
     name: Optional[str] = None
+    description: Optional[str] = Field(None, description="What this fork did, e.g. the start month the solver chose")
     is_feasible: bool
     purchase_month: int = Field(..., description="Month index of the (first) purchase; -1 for baseline")
     solver: SolverInfo

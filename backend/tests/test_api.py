@@ -385,11 +385,11 @@ def test_branch_scenario_parent_not_found(db_session):
 
 
 # ---------------------------------------------------------------------------
-# Infeasible decision: forks fail honestly instead of showing placeholder numbers
+# Unaffordable decision: evaluated honestly, not rejected
 # ---------------------------------------------------------------------------
 
-def test_unaffordable_purchase_fails_forks_not_baseline(committed_dataset_id, db_session):
-    # ₹60L against a ₹50k opening balance fails the fan-out sanity check (> 10x balance)
+def test_unaffordable_purchase_is_evaluated_and_flagged(committed_dataset_id, db_session):
+    # ₹60L against a ₹50k opening balance: every fork runs and the explanation says so
     dec = routes.create_decision(
         routes.CreateDecisionRequest(
             text="Buy a ₹60L GPU cluster on EMI without dropping below ₹25L reserve",
@@ -397,12 +397,84 @@ def test_unaffordable_purchase_fails_forks_not_baseline(committed_dataset_id, db
         ),
         db=db_session,
     )
-    scenarios = routes.generate_scenarios_endpoint(dec["id"], db=db_session)
-    statuses = {s["change"]["type"]: s["status"] for s in scenarios}
-    assert statuses["baseline"] == "queued"
-    assert all(statuses[t] == "failed" for t in FORK_TYPES)
-
+    routes.generate_scenarios_endpoint(dec["id"], db=db_session)
     run = _wait_for_run(routes.start_run(dec["id"], db=db_session)["run_id"], db_session)
-    assert run["scenarios"][f"{dec['id']}_baseline"] == "done"
+    assert set(run["scenarios"].values()) == {"done"}
     comp = routes.get_decision_comparison(dec["id"], db=db_session)
-    assert list(comp["results"]) == [f"{dec['id']}_baseline"]
+    forks = [r for r in comp["results"].values() if r["branch_type"] != "baseline"]
+    assert all(r["metrics"]["months_below_floor"] > 0 for r in forks)
+    assert "No option keeps you above" in comp["explanation"]["summary"]
+
+
+# ---------------------------------------------------------------------------
+# Decision kinds beyond one-time purchases
+# ---------------------------------------------------------------------------
+
+def _run_decision(text: str, dataset_id: str, db_session):
+    dec = routes.create_decision(routes.CreateDecisionRequest(text=text, dataset_id=dataset_id), db=db_session)
+    assert dec["status"] == "ok", dec
+    routes.generate_scenarios_endpoint(dec["id"], db=db_session)
+    run = _wait_for_run(routes.start_run(dec["id"], db=db_session)["run_id"], db_session)
+    return dec, run, routes.get_decision_comparison(dec["id"], db=db_session)
+
+
+def test_recurring_cost_gets_its_own_forks(db_session):
+    dec, run, comp = _run_decision("Hire an engineer at ₹70k per month without dropping below ₹1L",
+                                   "sample_personal", db_session)
+    assert dec["decision_kind"] == "recurring_expense"
+    assert "₹70,000/month" in dec["understood"]
+    assert set(run["scenarios"].values()) == {"done"}
+    branches = {r["branch_type"]: r for r in comp["results"].values()}
+    assert set(branches) == {"baseline", "absorb", "delay", "phase_in", "trim"}
+    assert branches["absorb"]["metrics"]["total_purchase_cost"] == pytest.approx(840000.0)
+    assert any(c["name"].startswith("New: ") for c in branches["absorb"]["cash_flow"]["categories"])
+    assert comp["explanation"]["guard_passed"] is True
+
+
+def test_income_shock_gets_its_own_forks(db_session):
+    dec, run, comp = _run_decision("What if I lose my job for 4 months? Keep at least 50k", "sample_personal",
+                                   db_session)
+    assert dec["decision_kind"] == "income_change"
+    branches = {r["branch_type"]: r for r in comp["results"].values()}
+    assert set(branches) == {"baseline", "absorb", "trim"}
+    assert branches["absorb"]["metrics"]["income_change_total"] < 0
+    assert comp["explanation"]["guard_passed"] is True
+
+
+def test_off_topic_prompt_is_unsupported(db_session):
+    dec = routes.create_decision(
+        routes.CreateDecisionRequest(text="what is the weather today", dataset_id="sample_personal"), db=db_session
+    )
+    assert dec["status"] == "unsupported"
+    assert dec["message"]
+
+
+@pytest.mark.asyncio
+async def test_excel_upload_with_monthly_income(db_session):
+    import pandas as pd
+    from fastapi import UploadFile
+
+    df = pd.DataFrame({"Date": pd.date_range("2024-04-01", periods=6, freq="MS"),
+                       "Expense Head": ["Rent"] * 6, "Spent": [20000.0] * 6})
+    buf = io.BytesIO()
+    df.to_excel(buf, index=False)
+    insp = await routes.inspect_dataset(file=UploadFile(filename="spend.xlsx", file=io.BytesIO(buf.getvalue())),
+                                        db=db_session)
+    assert insp["proposed_mapping"]["amount_col"] == "Spent"
+    commit = routes.commit_dataset(routes.CommitRequest(upload_id=insp["upload_id"],
+                                                        confirmed_mapping=insp["proposed_mapping"],
+                                                        starting_balance=10000.0, monthly_income=50000.0),
+                                   db=db_session)
+    assert commit["stats"]["total_inflow"] == pytest.approx(600000.0)
+    assert commit["stats"]["observed_months"] == 6
+    assert any("monthly income you entered" in w for w in commit["warnings"])
+
+
+@pytest.mark.asyncio
+async def test_unreadable_upload_is_rejected_clearly(db_session):
+    from fastapi import UploadFile
+
+    with pytest.raises(Exception) as exc:
+        await routes.inspect_dataset(file=UploadFile(filename="old.xls", file=io.BytesIO(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1x")),
+                                     db=db_session)
+    assert "UNREADABLE_FILE" in str(exc.value)
