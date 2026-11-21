@@ -167,6 +167,13 @@ export const CashFlowMatrix: React.FC<CashFlowMatrixProps> = ({ result, baseline
         {showDiff && <span className="flex items-center gap-1 text-amber-400">◇ Changed</span>}
       </div>
 
+      {cashFlow.projected?.some(Boolean) && (
+        <p className="px-4 pt-2 text-[11px] text-amber-300/80">
+          <span className="text-amber-400">*</span> Projected month: your file didn't cover it, so it uses your average
+          monthly income and spending.
+        </p>
+      )}
+
       {/* Table */}
       <div className="overflow-x-auto">
         <table className="w-full border-collapse min-w-[700px]">
@@ -182,8 +189,10 @@ export const CashFlowMatrix: React.FC<CashFlowMatrixProps> = ({ result, baseline
                               transition-colors hover:text-slate-200 border-r border-white/5
                               ${highlightedMonth === i ? 'text-cyan-400' : ''}`}
                   onClick={() => setHighlightedMonth(highlightedMonth === i ? null : i)}
+                  title={cashFlow.projected?.[i] ? 'Projected from your average monthly income and spending' : undefined}
                 >
                   {m}
+                  {cashFlow.projected?.[i] && <span className="text-amber-400">*</span>}
                 </th>
               ))}
             </tr>

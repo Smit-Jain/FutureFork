@@ -1,40 +1,46 @@
 """
-FutureFork Scenario Fan-out Agent (Member 4)
+FutureFork Scenario Fan-out Agent
 
-Builds 4 competing policy fork branches from a plain-English financial decision.
-Uses LangGraph StateGraph internally when available; falls back to plain Python
-function calls with identical external interface.
+Turns a parsed decision into competing policy forks. Which forks apply depends on the
+kind of decision (see engine.changes.FORKS_BY_KIND):
+
+  one_time           -> upfront, emi, phased, trim
+  recurring_expense  -> absorb, delay, phase_in, trim
+  income_change      -> absorb, trim
+
+Uses a LangGraph StateGraph (parse -> feasibility -> fan-out) when langgraph is
+installed and falls back to plain Python with the same result.
 
 Public API:
-  build_forks(prompt, baseline, dataset_type="personal") -> ForkSet
-
-Backward compat:
+  build_forks(prompt, baseline, dataset_type="personal") -> ForkSet        (parses first)
+  build_forks_from_decision(decision, baseline) -> ForkSet                 (no re-parse)
 """
 
 from __future__ import annotations
 
+import copy
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("futurefork.ai.agents.scenario")
+
 
 # ===========================================================================
 # Public types
 # ===========================================================================
 
-
 @dataclass
 class ForkSpec:
     """
-    One policy fork branch.
+    One policy fork.
 
     Attributes:
-        fork_id:               "upfront" | "emi" | "phased" | "trim"
-        title:                 Display title for this fork.
+        fork_id:               Branch type, e.g. "upfront" or "absorb".
+        title:                 Display title.
         policy_description:    One-sentence policy explanation.
-        goal:                  PurchaseGoal ready to pass to solver.
+        goal:                  PurchaseGoal ready for the engine.
         status:                "ready" | "infeasible" | "error"
         infeasibility_reason:  Set if status != "ready".
     """
@@ -42,115 +48,121 @@ class ForkSpec:
     fork_id: str
     title: str
     policy_description: str
-    goal: Any  # PurchaseGoal — typed as Any to avoid circular import issues
+    goal: Any
     status: str = "ready"
     infeasibility_reason: Optional[str] = None
 
 
 @dataclass
 class ForkSet:
-    """
-    Result of build_forks().
+    """Result of build_forks(): the parsed decision, its base goal and its forks."""
 
-    Attributes:
-        decision:      ParsedDecision (source of truth for the prompt).
-        baseline_goal: The base PurchaseGoal built from the parsed decision.
-        forks:         Exactly 4 ForkSpec objects in order: upfront, emi, phased, trim.
-    """
-
-    decision: Any  # ParsedDecision
-    baseline_goal: Any  # PurchaseGoal
-    forks: List[ForkSpec]  # always exactly 4
+    decision: Any        # ParsedDecision
+    baseline_goal: Any   # PurchaseGoal
+    forks: List[ForkSpec] = field(default_factory=list)
 
 
 # ===========================================================================
-# Internal helpers
+# Fork metadata
 # ===========================================================================
 
-_FORK_METADATA: Dict[str, Tuple[str, str]] = {
-    "upfront": (
+_FORK_METADATA: Dict[Tuple[str, str], Tuple[str, str]] = {
+    ("one_time", "upfront"): (
         "Upfront Purchase",
-        "Pay the full purchase cost immediately in a single payment with zero interest.",
+        "Pay the full cost in one go with zero interest, in the safest month the solver can find.",
     ),
-    "emi": (
+    ("one_time", "emi"): (
         "EMI / Installment Financing",
-        "Spread the capital outlay across monthly installments with an annual financing rate.",
+        "Spread the cost across monthly installments with an annual financing rate.",
     ),
-    "phased": (
+    ("one_time", "phased"): (
         "Phased / Milestone Purchase",
         "Split the purchase into two equal tranches (50/50) to smooth the cash-flow impact.",
     ),
-    "trim": (
+    ("one_time", "trim"): (
         "Trim & Buy",
-        "Optimally reduce discretionary spending to protect the emergency reserve while purchasing.",
+        "Buy in the planned month and cut flexible spending just enough to protect the emergency floor.",
+    ),
+    ("recurring_expense", "absorb"): (
+        "Commit As Planned",
+        "Take on the recurring cost from the planned month with no other changes.",
+    ),
+    ("recurring_expense", "delay"): (
+        "Delay the Start",
+        "Start at the earliest month that keeps your balance above the emergency floor.",
+    ),
+    ("recurring_expense", "phase_in"): (
+        "Phase It In",
+        "Start at 50% for the first 3 months, then the full amount.",
+    ),
+    ("recurring_expense", "trim"): (
+        "Trim to Fund It",
+        "Cut flexible spending (up to 35%) to pay for the new commitment while protecting the floor.",
+    ),
+    ("income_change", "absorb"): (
+        "Ride It Out",
+        "Keep spending as it is and let your balance absorb the change.",
+    ),
+    ("income_change", "trim"): (
+        "Trim Spending",
+        "Cut flexible spending (up to 35%) during the affected months to protect the emergency floor.",
     ),
 }
 
 
+def fork_metadata(kind: str, fork_id: str) -> Tuple[str, str]:
+    return _FORK_METADATA.get((kind, fork_id), (fork_id.replace("_", " ").title(), ""))
+
+
+# ===========================================================================
+# Helpers
+# ===========================================================================
+
 def _build_base_goal(decision: Any) -> Any:
-    """
-    Convert a ParsedDecision into a base PurchaseGoal.
-
-    Args:
-        decision: ParsedDecision instance.
-
-    Returns:
-        PurchaseGoal
-    """
+    """ParsedDecision -> base PurchaseGoal."""
     from engine.model import PurchaseGoal
 
+    kind = getattr(decision, "decision_kind", "one_time")
+    pref = decision.financing_preference if decision.financing_preference != "auto" else "upfront"
+    down_pct = float(getattr(decision, "downpayment_pct", 0.0) or 0.0)
+    interest = getattr(decision, "interest_rate_annual", None)
     return PurchaseGoal(
         item_name=decision.item_label,
-        total_cost=decision.total_cost,
-        emergency_floor=decision.emergency_floor,
-        target_month=decision.target_month,
-        financing_mode=decision.financing_preference if decision.financing_preference != "auto" else "upfront",
-        emi_months=decision.emi_months,
-        downpayment=0.0,
-        interest_rate_annual=0.10,
+        total_cost=float(decision.total_cost or 0.0),
+        emergency_floor=float(decision.emergency_floor or 0.0),
+        target_month=int(decision.target_month or 0),
+        financing_mode=pref,
+        emi_months=int(decision.emi_months or 6),
+        downpayment=round(float(decision.total_cost or 0.0) * down_pct, 2),
+        interest_rate_annual=0.10 if interest is None else float(interest),
         phased_splits=[],
         max_trim_pct=0.35,
         flexible_categories=[],
+        decision_kind=kind,
+        monthly_amount=float(getattr(decision, "monthly_amount", 0.0) or 0.0),
+        start_month=int(getattr(decision, "start_month", 0) or 0),
+        duration_months=int(getattr(decision, "duration_months", 12) or 12),
+        income_change_pct=float(getattr(decision, "income_change_pct", 0.0) or 0.0),
+        income_change_monthly=float(getattr(decision, "income_change_monthly", 0.0) or 0.0),
     )
 
 
 def _feasibility_check(decision: Any, baseline: Any) -> Optional[str]:
-    """
-    Sanity check the parsed decision against the baseline.
-
-    Returns:
-        Error message if infeasible, None if OK.
-    """
-    if decision.total_cost <= 0:
-        return "total_cost must be > 0"
+    """Returns a reason the decision can't be evaluated, or None. Unaffordable is NOT infeasible."""
+    kind = getattr(decision, "decision_kind", "one_time")
     if decision.emergency_floor < 0:
-        return "emergency_floor must be >= 0"
-    if baseline is not None:
-        starting = getattr(baseline, "starting_balance", 0.0)
-        if starting > 0 and decision.total_cost > 10 * starting:
-            return (
-                f"total_cost ({decision.total_cost:,.0f}) exceeds 10x starting_balance "
-                f"({starting:,.0f}); likely a parse error"
-            )
+        return "The emergency floor can't be negative."
+    if kind == "one_time" and decision.total_cost <= 0:
+        return "The cost must be greater than zero."
+    if kind == "recurring_expense" and getattr(decision, "monthly_amount", 0) <= 0:
+        return "The monthly cost must be greater than zero."
+    if kind == "income_change" and not (getattr(decision, "income_change_pct", 0) or getattr(decision, "income_change_monthly", 0)):
+        return "The size of the income change is missing."
     return None
 
 
-def _apply_fork(
-    fork_id: str,
-    base_goal: Any,
-    baseline: Any,
-) -> ForkSpec:
-    """
-    Apply the matching engine.changes transformer and build a ForkSpec.
-
-    Args:
-        fork_id:   "upfront" | "emi" | "phased" | "trim"
-        base_goal: Base PurchaseGoal.
-        baseline:  FinancialProblemInstance.
-
-    Returns:
-        ForkSpec with status "ready" or "error".
-    """
+def _apply_fork(kind: str, fork_id: str, base_goal: Any, baseline: Any) -> ForkSpec:
+    """Applies the fork's transformer (one-time decisions) and returns a ForkSpec."""
     from engine.changes import (
         apply_discretionary_trim,
         apply_emi_split,
@@ -158,143 +170,48 @@ def _apply_fork(
         apply_upfront,
     )
 
-    _APPLIERS = {
-        "upfront": apply_upfront,
-        "emi": apply_emi_split,
-        "phased": apply_phased_delay,
-        "trim": apply_discretionary_trim,
-    }
-
-    title, description = _FORK_METADATA[fork_id]
-    applier = _APPLIERS[fork_id]
-
+    title, description = fork_metadata(kind, fork_id)
     try:
-        transformed_goal = applier(baseline, base_goal)
-        return ForkSpec(
-            fork_id=fork_id,
-            title=title,
-            policy_description=description,
-            goal=transformed_goal,
-            status="ready",
-            infeasibility_reason=None,
-        )
+        if kind == "one_time":
+            applier = {"upfront": apply_upfront, "emi": apply_emi_split,
+                       "phased": apply_phased_delay, "trim": apply_discretionary_trim}[fork_id]
+            params = {}
+            if fork_id == "emi" and base_goal.total_cost:
+                params["downpayment_pct"] = round(base_goal.downpayment / base_goal.total_cost, 4)
+            goal = applier(baseline, base_goal, params)
+        else:
+            goal = copy.deepcopy(base_goal)
+            if fork_id == "trim" and baseline is not None:
+                goal.flexible_categories = [c for c, t in baseline.category_types.items() if t == "flexible"]
+        return ForkSpec(fork_id=fork_id, title=title, policy_description=description, goal=goal)
     except Exception as exc:
         logger.warning("Fork '%s' transformer raised: %s", fork_id, exc)
-        return ForkSpec(
-            fork_id=fork_id,
-            title=title,
-            policy_description=description,
-            goal=base_goal,  # keep base goal as fallback
-            status="error",
-            infeasibility_reason=str(exc),
-        )
+        return ForkSpec(fork_id=fork_id, title=title, policy_description=description, goal=base_goal,
+                        status="error", infeasibility_reason=str(exc))
 
 
-# ===========================================================================
-# Plain-Python implementation (always available)
-# ===========================================================================
+def _fan_out(decision: Any, baseline: Any) -> ForkSet:
+    from engine.changes import FORKS_BY_KIND
 
-
-def _build_forks_plain(
-    prompt: str,
-    baseline: Any,
-    dataset_type: str,
-) -> ForkSet:
-    """
-    Plain-Python fan-out into 4 policy forks.
-
-    Nodes (sequential):
-        1. parse: parse_financial_decision
-        2. feasibility_check
-        3. fork_upfront, fork_emi, fork_phased, fork_trim  (fan-out)
-        4. collect: assemble ForkSet
-
-    Args:
-        prompt:       Plain-English decision prompt.
-        baseline:     FinancialProblemInstance.
-        dataset_type: "personal" | "institute" | "startup".
-
-    Returns:
-        ForkSet with exactly 4 forks.
-    """
-    from ai.agents.parser import DecisionParseError, parse_financial_decision
-
-    # Node: parse
-    try:
-        decision = parse_financial_decision(prompt, baseline=baseline, dataset_type=dataset_type)
-    except DecisionParseError as exc:
-        logger.error("scenario: parse failed: %s", exc)
-        # Return 4 error forks with minimal data
-        from engine.model import PurchaseGoal
-        dummy_goal = PurchaseGoal(item_name="Unknown", total_cost=0.0)
-        from ai.agents.parser import ParsedDecision
-        dummy_decision = ParsedDecision(
-            item_label="Unknown",
-            total_cost=0.0,
-            emergency_floor=0.0,
-            quantity=None,
-            target_month=0,
-            financing_preference="auto",
-            emi_months=6,
-            dataset_type=dataset_type,
-            raw_prompt=prompt,
-            defaulted_fields=["total_cost"],
-        )
-        forks = [
-            ForkSpec(
-                fork_id=fid,
-                title=_FORK_METADATA[fid][0],
-                policy_description=_FORK_METADATA[fid][1],
-                goal=dummy_goal,
-                status="error",
-                infeasibility_reason=str(exc),
-            )
-            for fid in ["upfront", "emi", "phased", "trim"]
-        ]
-        return ForkSet(decision=dummy_decision, baseline_goal=dummy_goal, forks=forks)
-
-    # Node: feasibility_check
-    infeasibility = _feasibility_check(decision, baseline)
-
-    # Build base goal
+    kind = getattr(decision, "decision_kind", "one_time")
+    kind = kind if kind in FORKS_BY_KIND else "one_time"
     base_goal = _build_base_goal(decision)
-
-    if infeasibility:
-        logger.warning("scenario: feasibility check failed: %s", infeasibility)
-        forks = [
-            ForkSpec(
-                fork_id=fid,
-                title=_FORK_METADATA[fid][0],
-                policy_description=_FORK_METADATA[fid][1],
-                goal=base_goal,
-                status="infeasible",
-                infeasibility_reason=infeasibility,
-            )
-            for fid in ["upfront", "emi", "phased", "trim"]
-        ]
-        return ForkSet(decision=decision, baseline_goal=base_goal, forks=forks)
-
-    # Fan-out: apply 4 transformers
-    forks = [_apply_fork(fid, base_goal, baseline) for fid in ["upfront", "emi", "phased", "trim"]]
-
-    # Node: collect
+    reason = _feasibility_check(decision, baseline)
+    forks = []
+    for fid in FORKS_BY_KIND[kind]:
+        if reason:
+            title, desc = fork_metadata(kind, fid)
+            forks.append(ForkSpec(fid, title, desc, base_goal, "infeasible", reason))
+        else:
+            forks.append(_apply_fork(kind, fid, base_goal, baseline))
     return ForkSet(decision=decision, baseline_goal=base_goal, forks=forks)
 
 
 # ===========================================================================
-# LangGraph implementation (when available)
+# LangGraph pipeline (parse -> feasibility -> fan-out)
 # ===========================================================================
 
-
-def _try_build_forks_langgraph(
-    prompt: str,
-    baseline: Any,
-    dataset_type: str,
-) -> Optional[ForkSet]:
-    """
-    Try to run the fan-out using a LangGraph StateGraph.
-    Returns ForkSet or None if LangGraph is not available.
-    """
+def _run_langgraph(prompt: Optional[str], decision: Any, baseline: Any, dataset_type: str) -> Optional[ForkSet]:
     try:
         from typing import TypedDict
 
@@ -304,191 +221,69 @@ def _try_build_forks_langgraph(
 
     from ai.agents.parser import DecisionParseError, parse_financial_decision
 
-    # State schema
     class _State(TypedDict, total=False):
-        prompt: str
-        baseline: Any
-        dataset_type: str
+        prompt: Optional[str]
         decision: Any
-        base_goal: Any
-        infeasibility: Optional[str]
-        forks: List[ForkSpec]
         error: Optional[str]
-
-    # Node functions --------------------------------------------------------
+        fork_set: Any
 
     def node_parse(state: _State) -> _State:
+        if state.get("decision") is not None:
+            return state
         try:
-            decision = parse_financial_decision(
-                state["prompt"],
-                baseline=state.get("baseline"),
-                dataset_type=state.get("dataset_type", "personal"),
-            )
-            return {**state, "decision": decision, "error": None}
+            d = parse_financial_decision(state.get("prompt") or "", baseline=baseline, dataset_type=dataset_type)
+            return {**state, "decision": d, "error": None}
         except DecisionParseError as exc:
-            return {**state, "decision": None, "error": str(exc)}
+            return {**state, "error": str(exc)}
 
-    def node_feasibility(state: _State) -> _State:
-        if state.get("error") or state.get("decision") is None:
-            return {**state, "infeasibility": state.get("error")}
-        decision = state["decision"]
-        base_goal = _build_base_goal(decision)
-        infeasibility = _feasibility_check(decision, state.get("baseline"))
-        return {**state, "base_goal": base_goal, "infeasibility": infeasibility}
+    def node_fan_out(state: _State) -> _State:
+        if state.get("decision") is None:
+            return state
+        return {**state, "fork_set": _fan_out(state["decision"], baseline)}
 
-    def node_fork_upfront(state: _State) -> _State:
-        forks = list(state.get("forks") or [])
-        if state.get("infeasibility") or not state.get("base_goal"):
-            forks.append(ForkSpec(
-                fork_id="upfront", title=_FORK_METADATA["upfront"][0],
-                policy_description=_FORK_METADATA["upfront"][1],
-                goal=state.get("base_goal"), status="infeasible",
-                infeasibility_reason=state.get("infeasibility"),
-            ))
-        else:
-            forks.append(_apply_fork("upfront", state["base_goal"], state["baseline"]))
-        return {**state, "forks": forks}
-
-    def node_fork_emi(state: _State) -> _State:
-        forks = list(state.get("forks") or [])
-        if state.get("infeasibility") or not state.get("base_goal"):
-            forks.append(ForkSpec(
-                fork_id="emi", title=_FORK_METADATA["emi"][0],
-                policy_description=_FORK_METADATA["emi"][1],
-                goal=state.get("base_goal"), status="infeasible",
-                infeasibility_reason=state.get("infeasibility"),
-            ))
-        else:
-            forks.append(_apply_fork("emi", state["base_goal"], state["baseline"]))
-        return {**state, "forks": forks}
-
-    def node_fork_phased(state: _State) -> _State:
-        forks = list(state.get("forks") or [])
-        if state.get("infeasibility") or not state.get("base_goal"):
-            forks.append(ForkSpec(
-                fork_id="phased", title=_FORK_METADATA["phased"][0],
-                policy_description=_FORK_METADATA["phased"][1],
-                goal=state.get("base_goal"), status="infeasible",
-                infeasibility_reason=state.get("infeasibility"),
-            ))
-        else:
-            forks.append(_apply_fork("phased", state["base_goal"], state["baseline"]))
-        return {**state, "forks": forks}
-
-    def node_fork_trim(state: _State) -> _State:
-        forks = list(state.get("forks") or [])
-        if state.get("infeasibility") or not state.get("base_goal"):
-            forks.append(ForkSpec(
-                fork_id="trim", title=_FORK_METADATA["trim"][0],
-                policy_description=_FORK_METADATA["trim"][1],
-                goal=state.get("base_goal"), status="infeasible",
-                infeasibility_reason=state.get("infeasibility"),
-            ))
-        else:
-            forks.append(_apply_fork("trim", state["base_goal"], state["baseline"]))
-        return {**state, "forks": forks}
-
-    def node_collect(state: _State) -> _State:
-        # Already assembled in forks list
-        return state
-
-    # Build graph -----------------------------------------------------------
     try:
         graph = StateGraph(_State)
         graph.add_node("parse", node_parse)
-        graph.add_node("feasibility_check", node_feasibility)
-        graph.add_node("fork_upfront", node_fork_upfront)
-        graph.add_node("fork_emi", node_fork_emi)
-        graph.add_node("fork_phased", node_fork_phased)
-        graph.add_node("fork_trim", node_fork_trim)
-        graph.add_node("collect", node_collect)
-
+        graph.add_node("fan_out", node_fan_out)
         graph.set_entry_point("parse")
-        graph.add_edge("parse", "feasibility_check")
-        # Sequential fan-out (LangGraph doesn't support true parallel fan-out in simple API)
-        graph.add_edge("feasibility_check", "fork_upfront")
-        graph.add_edge("fork_upfront", "fork_emi")
-        graph.add_edge("fork_emi", "fork_phased")
-        graph.add_edge("fork_phased", "fork_trim")
-        graph.add_edge("fork_trim", "collect")
-        graph.add_edge("collect", END)
-
-        compiled = graph.compile()
-        init_state: _State = {
-            "prompt": prompt,
-            "baseline": baseline,
-            "dataset_type": dataset_type,
-            "forks": [],
-        }
-        final_state = compiled.invoke(init_state)
-
-        forks = final_state.get("forks") or []
-        decision = final_state.get("decision")
-        base_goal = final_state.get("base_goal")
-
-        if decision is None:
-            # Parse failed — return error ForkSet via plain path
-            return None
-
-        # Ensure exactly 4 forks
-        fork_ids_seen = {f.fork_id for f in forks}
-        for fid in ["upfront", "emi", "phased", "trim"]:
-            if fid not in fork_ids_seen:
-                forks.append(ForkSpec(
-                    fork_id=fid,
-                    title=_FORK_METADATA[fid][0],
-                    policy_description=_FORK_METADATA[fid][1],
-                    goal=base_goal,
-                    status="error",
-                    infeasibility_reason="fork not built by graph",
-                ))
-
-        # Sort to canonical order
-        order = {"upfront": 0, "emi": 1, "phased": 2, "trim": 3}
-        forks.sort(key=lambda f: order.get(f.fork_id, 99))
-
-        return ForkSet(decision=decision, baseline_goal=base_goal, forks=forks)
-
+        graph.add_edge("parse", "fan_out")
+        graph.add_edge("fan_out", END)
+        final = graph.compile().invoke({"prompt": prompt, "decision": decision})
+        return final.get("fork_set")
     except Exception as exc:
-        logger.warning("LangGraph build_forks failed: %s", exc)
+        logger.warning("LangGraph fan-out failed: %s", exc)
         return None
+
+
+def _offline() -> bool:
+    return os.environ.get("FUTUREFORK_OFFLINE", "").strip() in ("1", "true", "yes")
 
 
 # ===========================================================================
 # Public API
 # ===========================================================================
 
-
-def build_forks(
-    prompt: str,
-    baseline: Any,  # FinancialProblemInstance
-    dataset_type: str = "personal",
-) -> ForkSet:
-    """
-    Parse the prompt and fan out into 4 competing policy forks.
-
-    Uses LangGraph StateGraph internally when langgraph is installed.
-    Falls back to plain Python function calls with identical interface.
-    Works fully offline (parser fallback + deterministic transformers).
-
-    Args:
-        prompt:       Plain-English financial decision prompt.
-        baseline:     FinancialProblemInstance (Node 0 baseline).
-        dataset_type: "personal" | "institute" | "startup".
-
-    Returns:
-        ForkSet with exactly 4 ForkSpec objects in order: upfront, emi, phased, trim.
-    """
-    # Try LangGraph first
-    offline = os.environ.get("FUTUREFORK_OFFLINE", "").strip() in ("1", "true", "yes")
-    if not offline:
-        result = _try_build_forks_langgraph(prompt, baseline, dataset_type)
+def build_forks_from_decision(decision: Any, baseline: Any) -> ForkSet:
+    """Fan an already-parsed decision out into its forks (no second parse)."""
+    if not _offline():
+        result = _run_langgraph(None, decision, baseline, getattr(decision, "dataset_type", "personal"))
         if result is not None:
             logger.info("scenario: used LangGraph StateGraph")
             return result
-        logger.info("scenario: LangGraph unavailable or failed, using plain Python")
+    return _fan_out(decision, baseline)
 
-    # Fallback to plain Python
-    result = _build_forks_plain(prompt, baseline, dataset_type)
-    logger.info("scenario: used plain Python fan-out")
-    return result
+
+def build_forks(prompt: str, baseline: Any, dataset_type: str = "personal") -> ForkSet:
+    """
+    Parse the prompt and fan out into competing forks.
+
+    Raises DecisionParseError (or OffTopicPromptError) if the prompt can't be parsed.
+    """
+    if not _offline():
+        result = _run_langgraph(prompt, None, baseline, dataset_type)
+        if result is not None:
+            logger.info("scenario: used LangGraph StateGraph")
+            return result
+    from ai.agents.parser import parse_financial_decision
+
+    return _fan_out(parse_financial_decision(prompt, baseline=baseline, dataset_type=dataset_type), baseline)

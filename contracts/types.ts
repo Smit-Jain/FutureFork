@@ -1,11 +1,12 @@
 // FutureFork API contract (TypeScript mirror of contracts/schemas.py).
 // Keep frontend/src/contracts/types.ts identical to this file.
 
-export type BranchType = 'baseline' | 'upfront' | 'emi' | 'phased' | 'trim';
+export type BranchType = 'baseline' | 'upfront' | 'emi' | 'phased' | 'trim' | 'absorb' | 'delay' | 'phase_in';
 export type ForkType = Exclude<BranchType, 'baseline'>;
+export type DecisionKind = 'one_time' | 'recurring_expense' | 'income_change';
 export type DatasetType = 'personal' | 'institute' | 'startup';
 export type ScenarioStatus = 'queued' | 'running' | 'done' | 'failed';
-export type DecisionStatus = 'ok' | 'needs_clarification';
+export type DecisionStatus = 'ok' | 'needs_clarification' | 'unsupported';
 export type CategoryType = 'fixed' | 'flexible';
 
 // ─── Datasets ──────────────────────────────────────────────────────────────
@@ -18,6 +19,7 @@ export interface ColumnMapping {
   category_col: string | null;
   description_col: string | null;
   type_col: string | null;
+  balance_col: string | null;
   date_format: string | null;
   starting_balance: number;
 }
@@ -33,6 +35,8 @@ export interface InspectResponse {
   mapping_source: 'llm' | 'regex';
   dataset_type: DatasetType;
   preview_rows: Record<string, string>[];
+  row_count: number;
+  warnings: string[];
   ttl_seconds: number;
 }
 
@@ -42,6 +46,7 @@ export interface CommitRequest {
   dataset_name?: string;
   starting_balance?: number;
   dataset_type?: DatasetType;
+  monthly_income?: number;      // for expenses-only files
 }
 
 export interface DatasetStats {
@@ -51,6 +56,10 @@ export interface DatasetStats {
   total_inflow: number;
   total_outflow: number;
   category_types: Record<string, CategoryType>;
+  observed_months?: number;
+  projected_months?: number[];
+  currency?: string;
+  warnings?: string[];
 }
 
 export interface CommitResponse {
@@ -59,6 +68,7 @@ export interface CommitResponse {
   dataset_type: DatasetType;
   stats: DatasetStats;
   baseline_metrics: Record<string, number | string | boolean>;
+  warnings: string[];
 }
 
 export interface DatasetSummary {
@@ -81,6 +91,8 @@ export interface DecisionSpec {
   text: string;
   dataset_id: string;
   dataset_type: DatasetType;
+  decision_kind: DecisionKind | null;
+  understood: string | null;      // plain-English summary of what was understood
   change: ChangeSpec;
   status: DecisionStatus;
   message: string | null;
@@ -120,6 +132,9 @@ export interface FinancialMetrics {
   total_purchase_cost: number;
   total_financing_interest: number;
   total_trims_saved: number;
+  income_change_total: number;
+  monthly_emi?: number | null;
+  remaining_loan_principal?: number | null;
 }
 
 export interface MetricDistribution {
@@ -146,6 +161,7 @@ export interface CashFlowCategory {
 
 export interface CashFlowMatrixData {
   months: string[];
+  projected: boolean[];             // true for months projected from your averages
   inflows: number[];
   purchase_cash_out: number[];
   categories: CashFlowCategory[];
@@ -156,6 +172,7 @@ export interface FinancialScenarioResult {
   decision_id?: string | null;
   branch_type: BranchType;
   name?: string | null;
+  description?: string | null;
   is_feasible: boolean;
   purchase_month: number;
   solver: { status: string; solver?: string | null; runtime_s: number };

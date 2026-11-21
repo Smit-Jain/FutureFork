@@ -29,7 +29,17 @@ and a deficit variable $D_t \ge F - B_t$, $D_t \ge 0$ against the emergency floo
 
 ---
 
-## 3. The Four Forks ([`changes.py`](changes.py), [`solver.py`](solver.py))
+## 3. Forks ([`changes.py`](changes.py), [`solver.py`](solver.py))
+
+`FORKS_BY_KIND` decides which forks apply:
+
+| Decision kind | Forks | How it is modelled |
+|---|---|---|
+| `one_time` | upfront, emi, phased, trim | A purchase cash-out, optimised by the CP-SAT forks below |
+| `recurring_expense` | absorb, delay, phase_in, trim | `adjust_instance` adds the commitment as a new fixed category; `delay` searches the earliest safe start month; `phase_in` charges 50% for 3 months; `trim` runs the trim solver on the adjusted cash flow |
+| `income_change` | absorb, trim | `adjust_instance` scales (or shifts) inflows in the affected months |
+
+One-time forks:
 
 | Fork | Transformer | CP-SAT decision | Secondary objective |
 |---|---|---|---|
@@ -40,7 +50,7 @@ and a deficit variable $D_t \ge F - B_t$, $D_t \ge 0$ against the emergency floo
 
 `normalize_branch_type` maps aliases (`phased_delay`, `discretionary_trim`, `lease`, ...) to the four canonical types and rejects anything else.
 
-**Known limitation:** Trim & Buy always buys in the target month, while Upfront may move the purchase to the safest month. Trim can therefore end with a lower minimum balance than Upfront.
+Phased and Trim & Buy are solved for the earliest first-payment month (from the target onwards) that keeps the balance above the floor, like Upfront and EMI. EMIs up to 12 months use flat interest; longer loans use the reducing-balance EMI formula and report `remaining_loan_principal` after the 12-month horizon.
 
 ---
 

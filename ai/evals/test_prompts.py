@@ -38,8 +38,7 @@ from ai.agents.mapper import propose_mapping
 from ai.agents.parser import ParsedDecision, parse_financial_decision, parse_indian_amount
 from ai.agents.scenario import ForkSet, build_forks
 from data.loader import load_sample_csv_bytes, load_sample_instance
-from engine.model import ColumnMapping, PurchaseGoal, ScenarioEvaluationResult
-from engine.solver import solve_all_financial_scenarios
+from engine.model import ColumnMapping, ScenarioEvaluationResult
 
 # ===========================================================================
 # Test prompt definitions
@@ -122,10 +121,60 @@ TEST_PROMPTS = [
         "starting_balance": 6000000.0,
         "dataset_type": "startup",
         "expected": {
-            "total_cost": 1800000.0,
+            # "₹18L annual cost" for both engineers is ₹1.5L/month of payroll, not a one-off purchase
+            "decision_kind": "recurring_expense",
+            "monthly_amount": 150000.0,
             "emergency_floor": 500000.0,
             "quantity": 2,
         },
+    },
+    {
+        "id": "S3",
+        "label": "Startup per-head hiring",
+        "prompt": "Hire 3 engineers at ₹1.2L per month each",
+        "csv_name": "startup_pnl.csv",
+        "starting_balance": 6000000.0,
+        "dataset_type": "startup",
+        "expected": {"decision_kind": "recurring_expense", "monthly_amount": 360000.0, "emergency_floor": 0.0},
+    },
+    {
+        "id": "P3",
+        "label": "Personal pay cut",
+        "prompt": "What if my salary drops by 20% for 6 months? Keep at least 50k",
+        "csv_name": "personal_upi.csv",
+        "starting_balance": 150000.0,
+        "dataset_type": "personal",
+        "expected": {"decision_kind": "income_change", "income_change_pct": -20.0, "duration_months": 6,
+                     "emergency_floor": 50000.0},
+    },
+    {
+        "id": "P4",
+        "label": "Personal job loss",
+        "prompt": "I might lose my job for 3 months",
+        "csv_name": "personal_upi.csv",
+        "starting_balance": 150000.0,
+        "dataset_type": "personal",
+        "expected": {"decision_kind": "income_change", "income_change_pct": -100.0, "duration_months": 3,
+                     "emergency_floor": 0.0},
+    },
+    {
+        "id": "P5",
+        "label": "Hinglish purchase",
+        "prompt": "mujhe 50 hazar ka phone lena hai",
+        "csv_name": "personal_upi.csv",
+        "starting_balance": 150000.0,
+        "dataset_type": "personal",
+        "expected": {"total_cost": 50000.0, "emergency_floor": 0.0},
+    },
+    {
+        "id": "P6",
+        "label": "Home loan with down payment",
+        "prompt": "Buy a house worth 75L with 20% down payment on a 20 year loan",
+        "csv_name": "personal_upi.csv",
+        "starting_balance": 150000.0,
+        "dataset_type": "personal",
+        "expected": {"total_cost": 7500000.0, "emergency_floor": 0.0, "financing_preference": "emi",
+                     "emi_months": 240, "downpayment_pct": 0.2},
     },
 ]
 
@@ -227,26 +276,20 @@ def run_prompt_test(tc: Dict[str, Any]) -> Tuple[bool, List[str]]:
         parsed = parse_financial_decision(prompt, baseline=baseline, dataset_type=dataset_type)
         assert isinstance(parsed, ParsedDecision), "parser did not return ParsedDecision"
 
-        exp_cost = expected["total_cost"]
-        exp_floor = expected["emergency_floor"]
+        def close(actual: float, exp: float) -> bool:
+            return abs(actual - exp) / max(abs(exp), 1.0) < 0.02
 
-        cost_ok = abs(parsed.total_cost - exp_cost) / max(exp_cost, 1.0) < 0.02
-        if not cost_ok:
-            failures.append(f"(b) total_cost={parsed.total_cost:.0f}, expected={exp_cost:.0f}")
-
-        floor_ok = abs(parsed.emergency_floor - exp_floor) / max(exp_floor, 1.0) < 0.02
-        if not floor_ok:
-            failures.append(f"(b) emergency_floor={parsed.emergency_floor:.0f}, expected={exp_floor:.0f}")
-
-        exp_qty = expected.get("quantity")
-        if exp_qty is not None:
-            if parsed.quantity != exp_qty:
-                failures.append(f"(b) quantity={parsed.quantity}, expected={exp_qty}")
-
-        exp_fin = expected.get("financing_preference")
-        if exp_fin is not None:
-            if parsed.financing_preference != exp_fin:
-                failures.append(f"(b) financing_preference={parsed.financing_preference!r}, expected={exp_fin!r}")
+        exp_kind = expected.get("decision_kind", "one_time")
+        if parsed.decision_kind != exp_kind:
+            failures.append(f"(b) decision_kind={parsed.decision_kind!r}, expected={exp_kind!r}")
+        for name in ("total_cost", "emergency_floor", "monthly_amount", "income_change_pct", "downpayment_pct"):
+            if name in expected and not close(float(getattr(parsed, name)), float(expected[name])):
+                failures.append(f"(b) {name}={getattr(parsed, name)}, expected={expected[name]}")
+        for name in ("quantity", "financing_preference", "duration_months", "emi_months"):
+            if expected.get(name) is not None and getattr(parsed, name) != expected[name]:
+                failures.append(f"(b) {name}={getattr(parsed, name)!r}, expected={expected[name]!r}")
+        if not parsed.understood:
+            failures.append("(b) missing 'understood' summary")
 
     except Exception as exc:
         failures.append(f"(b) Parser: {exc}")
@@ -255,17 +298,19 @@ def run_prompt_test(tc: Dict[str, Any]) -> Tuple[bool, List[str]]:
     if parsed is None:
         return False, failures
 
-    # --- (c) Exactly 4 forks with correct ids ---
+    # --- (c) Forks match the decision kind ---
+    from engine.changes import FORKS_BY_KIND
+
     try:
         fork_set = build_forks(prompt, baseline=baseline, dataset_type=dataset_type)
         assert isinstance(fork_set, ForkSet), "build_forks did not return ForkSet"
-        assert len(fork_set.forks) == 4, f"Expected 4 forks, got {len(fork_set.forks)}"
         fork_ids = [f.fork_id for f in fork_set.forks]
-        for expected_id in ["upfront", "emi", "phased", "trim"]:
-            if expected_id not in fork_ids:
-                failures.append(f"(c) Missing fork id: {expected_id!r}")
-        if fork_ids != ["upfront", "emi", "phased", "trim"]:
-            failures.append(f"(c) Fork order wrong: {fork_ids}")
+        expected_ids = list(FORKS_BY_KIND[parsed.decision_kind])
+        if fork_ids != expected_ids:
+            failures.append(f"(c) forks={fork_ids}, expected={expected_ids}")
+        not_ready = [f.fork_id for f in fork_set.forks if f.status != "ready"]
+        if not_ready:
+            failures.append(f"(c) forks not ready: {not_ready}")
     except Exception as exc:
         failures.append(f"(c) ForkSet: {exc}")
         fork_set = None
@@ -273,37 +318,19 @@ def run_prompt_test(tc: Dict[str, Any]) -> Tuple[bool, List[str]]:
     if fork_set is None:
         return False, failures
 
-    # --- (d) Solve scenarios and check result keys ---
+    # --- (d) Every fork is solved by the engine (CP-SAT + Monte Carlo) ---
+    from engine.solver import evaluate_financial_branch
+
     try:
-        # Use the parsed decision to build a PurchaseGoal for the solver
-        goal = PurchaseGoal(
-            item_name=parsed.item_label,
-            total_cost=parsed.total_cost,
-            emergency_floor=parsed.emergency_floor,
-            target_month=parsed.target_month,
-            financing_mode="auto",
-            emi_months=parsed.emi_months,
-        )
-        branch_results = solve_all_financial_scenarios(
-            baseline,
-            goal,
-            run_monte_carlo=True,
-            n_sims=50,  # small for speed
-            seed=42,
-        )
+        branch_results = {"baseline": evaluate_financial_branch(baseline, "baseline", fork_set.baseline_goal, n_sims=50)}
+        for fork in fork_set.forks:
+            branch_results[fork.fork_id] = evaluate_financial_branch(baseline, fork.fork_id, fork.goal, n_sims=50)
 
         required_keys = {"survival_score_pct", "cash_out_risk_pct", "lowest_balance", "p10_lowest_balance"}
         for scenario_id, result in branch_results.items():
-            if scenario_id == "baseline":
-                continue
-            metrics = result.metrics if hasattr(result, "metrics") else {}
-            sim = result.simulation_results if hasattr(result, "simulation_results") else {}
-            # Check required keys across metrics + simulation_results
-            combined = {**metrics, **(sim or {})}
-            for k in required_keys:
-                if k not in combined:
-                    failures.append(f"(d) {scenario_id}: missing key {k!r}")
-
+            missing = required_keys - set(result.metrics)
+            if missing:
+                failures.append(f"(d) {scenario_id}: missing keys {sorted(missing)}")
     except Exception as exc:
         failures.append(f"(d) Solver: {exc}")
         branch_results = None

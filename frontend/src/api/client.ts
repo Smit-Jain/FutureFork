@@ -83,6 +83,7 @@ export const api = {
         dataset_type: payload.dataset_type || 'personal',
         stats: { months: 12, categories: 8, starting_balance: payload.starting_balance || 0, total_inflow: 0, total_outflow: 0, category_types: {} },
         baseline_metrics: {},
+        warnings: ['Mock mode: placeholder data, not computed from your file.'],
       };
     }
     return request('/datasets/commit', json(payload));
@@ -99,6 +100,8 @@ export const api = {
         text,
         dataset_id: datasetId,
         dataset_type: 'personal',
+        decision_kind: hasAmount ? 'one_time' : null,
+        understood: hasAmount ? 'Mock mode: a one-time cost of ₹1,20,000, with a ₹30,000 minimum balance.' : null,
         change: { type: 'emi', params: {} },
         status: hasAmount ? 'ok' : 'needs_clarification',
         message: hasAmount ? null : 'Please include an amount like ₹60L, ₹1.2 lakh, or ₹30,000.',

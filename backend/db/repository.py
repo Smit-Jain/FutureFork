@@ -53,6 +53,10 @@ def build_dataset_record(
         "total_inflow": round(float(sum(instance.inflows)), 2),
         "total_outflow": round(float(sum(instance.total_outflows)), 2),
         "category_types": instance.category_types,
+        "observed_months": int(instance.raw_metadata.get("observed_months", len(instance.months))),
+        "projected_months": list(instance.raw_metadata.get("projected_months", [])),
+        "currency": instance.raw_metadata.get("currency", "INR"),
+        "warnings": list(instance.raw_metadata.get("warnings", [])),
     }
     description = f"Financial dataset compiled from {source_filename}"
     summary = {

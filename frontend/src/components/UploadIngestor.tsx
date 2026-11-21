@@ -5,11 +5,11 @@ import { ColumnMapping, ColumnRole, DatasetType, InspectResponse } from '../cont
 import { SAMPLE_DATASETS } from '../mocks/fixtures';
 
 interface UploadIngestorProps {
-  onDatasetReady: (datasetId: string, name: string, datasetType: DatasetType) => void;
+  onDatasetReady: (datasetId: string, name: string, datasetType: DatasetType, warnings: string[]) => void;
 }
 
 const COLUMN_ROLES: ColumnRole[] = [
-  'date_col', 'amount_col', 'debit_col', 'credit_col', 'type_col', 'category_col', 'description_col',
+  'date_col', 'amount_col', 'debit_col', 'credit_col', 'type_col', 'balance_col', 'category_col', 'description_col',
 ];
 
 const ROLE_LABELS: Record<ColumnRole | 'ignore', string> = {
@@ -18,6 +18,7 @@ const ROLE_LABELS: Record<ColumnRole | 'ignore', string> = {
   debit_col: '↘ Debit (money out)',
   credit_col: '↗ Credit (money in)',
   type_col: '⇄ Type (inflow / outflow)',
+  balance_col: '💰 Running balance',
   category_col: '🏷 Category',
   description_col: '📝 Description',
   ignore: '✕ Ignore',
@@ -35,6 +36,7 @@ export const UploadIngestor: React.FC<UploadIngestorProps> = ({ onDatasetReady }
   const [mapping, setMapping] = useState<ColumnMapping | null>(null);
   const [datasetType, setDatasetType] = useState<DatasetType>('personal');
   const [openingBalance, setOpeningBalance] = useState('');
+  const [monthlyIncome, setMonthlyIncome] = useState('');
   const [datasetName, setDatasetName] = useState('');
   const [isInspecting, setIsInspecting] = useState(false);
   const [isCommitting, setIsCommitting] = useState(false);
@@ -50,8 +52,9 @@ export const UploadIngestor: React.FC<UploadIngestorProps> = ({ onDatasetReady }
       setInspectResult(result);
       setMapping(result.proposed_mapping);
       setDatasetType(result.dataset_type);
-      setDatasetName(file.name.replace(/\.csv$/i, '').replace(/[_-]+/g, ' '));
+      setDatasetName(file.name.replace(/\.(csv|tsv|txt|xlsx)$/i, '').replace(/[_-]+/g, ' '));
       setOpeningBalance('');
+      setMonthlyIncome('');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to inspect file');
     } finally {
@@ -83,9 +86,11 @@ export const UploadIngestor: React.FC<UploadIngestorProps> = ({ onDatasetReady }
 
   const handleCommit = async () => {
     if (!inspectResult || !mapping) return;
-    const balance = openingBalance.trim() ? parseFloat(openingBalance.replace(/[,₹\s]/g, '')) : undefined;
-    if (balance !== undefined && isNaN(balance)) {
-      setError('Opening balance must be a number, e.g. 285000.');
+    const toNumber = (v: string) => (v.trim() ? parseFloat(v.replace(/[,₹\s]/g, '')) : undefined);
+    const balance = toNumber(openingBalance);
+    const income = toNumber(monthlyIncome);
+    if ((balance !== undefined && isNaN(balance)) || (income !== undefined && isNaN(income))) {
+      setError('Opening balance and monthly income must be numbers, e.g. 285000.');
       return;
     }
     setIsCommitting(true);
@@ -96,9 +101,10 @@ export const UploadIngestor: React.FC<UploadIngestorProps> = ({ onDatasetReady }
         confirmed_mapping: mapping,
         dataset_name: datasetName || undefined,
         starting_balance: balance,
+        monthly_income: income,
         dataset_type: datasetType,
       });
-      onDatasetReady(result.dataset_id, result.name, result.dataset_type);
+      onDatasetReady(result.dataset_id, result.name, result.dataset_type, result.warnings ?? []);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to build the baseline');
     } finally {
@@ -118,7 +124,7 @@ export const UploadIngestor: React.FC<UploadIngestorProps> = ({ onDatasetReady }
           {SAMPLE_DATASETS.map((preset) => (
             <button
               key={preset.id}
-              onClick={() => onDatasetReady(preset.id, preset.name, preset.dataset_type)}
+              onClick={() => onDatasetReady(preset.id, preset.name, preset.dataset_type, [])}
               className="p-3 rounded-xl text-left border border-white/10 bg-white/5 hover:bg-emerald-500/10
                          hover:border-emerald-500/40 transition-all duration-200"
             >
@@ -142,7 +148,7 @@ export const UploadIngestor: React.FC<UploadIngestorProps> = ({ onDatasetReady }
         <input
           ref={fileInputRef}
           type="file"
-          accept=".csv"
+          accept=".csv,.tsv,.txt,.xlsx"
           className="hidden"
           onChange={async (e) => { const f = e.target.files?.[0]; if (f) await processFile(f); }}
         />
@@ -157,7 +163,7 @@ export const UploadIngestor: React.FC<UploadIngestorProps> = ({ onDatasetReady }
               <Upload className={`w-8 h-8 ${isDragging ? 'text-emerald-400' : 'text-slate-500'}`} />
             </div>
             <div className="text-center space-y-1">
-              <p className="text-sm font-semibold text-slate-300">Drop your CSV here</p>
+              <p className="text-sm font-semibold text-slate-300">Drop your CSV or Excel file here</p>
               <p className="text-xs text-slate-500">or click to browse: bank / UPI statements, ERP ledgers, P&L exports</p>
             </div>
           </>
@@ -177,13 +183,19 @@ export const UploadIngestor: React.FC<UploadIngestorProps> = ({ onDatasetReady }
             <FileText className="w-4 h-4 text-slate-500" />
             <span>{inspectResult.filename}</span>
             <span className="text-slate-600">|</span>
-            <span>{inspectResult.headers.length} columns</span>
+            <span>{inspectResult.row_count} rows · {inspectResult.headers.length} columns</span>
             <span className="text-slate-600">|</span>
             <span>
               Mapping proposed by {inspectResult.mapping_source === 'llm' ? 'AI' : 'rules'} (
               {Math.round(inspectResult.mapping_confidence * 100)}% confidence)
             </span>
           </div>
+
+          {inspectResult.warnings.length > 0 && (
+            <div className="px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs space-y-1">
+              {inspectResult.warnings.map((w) => <div key={w}>• {w}</div>)}
+            </div>
+          )}
 
           {/* Column mapping */}
           <div className="glass-card p-5 space-y-3">
@@ -236,7 +248,7 @@ export const UploadIngestor: React.FC<UploadIngestorProps> = ({ onDatasetReady }
           </div>
 
           {/* Parameters */}
-          <div className="glass-card p-5 grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="glass-card p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="space-y-1">
               <label className="text-xs text-slate-400 font-medium">Dataset name</label>
               <input value={datasetName} onChange={(e) => setDatasetName(e.target.value)} className="dark-input w-full" />
@@ -248,6 +260,15 @@ export const UploadIngestor: React.FC<UploadIngestorProps> = ({ onDatasetReady }
                 onChange={(e) => setOpeningBalance(e.target.value)}
                 className="dark-input w-full font-mono tabular-nums"
                 placeholder="e.g. 285000"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-slate-400 font-medium">Monthly income (₹, optional)</label>
+              <input
+                value={monthlyIncome}
+                onChange={(e) => setMonthlyIncome(e.target.value)}
+                className="dark-input w-full font-mono tabular-nums"
+                placeholder="if the file has no income rows"
               />
             </div>
             <div className="space-y-1">

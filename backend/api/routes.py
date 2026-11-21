@@ -16,11 +16,9 @@ Financial CSV decision pipeline:
   GET  /health  /ping             → liveness
 """
 
-import csv
-import io
 import logging
 import uuid
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
@@ -46,6 +44,8 @@ logger = logging.getLogger("futurefork.api")
 router = APIRouter()
 
 UPLOAD_TTL_MINUTES = 15
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+MAPPING_SAMPLE_ROWS = 200
 DATASET_TYPES = ("personal", "institute", "startup")
 
 
@@ -64,6 +64,9 @@ class CommitRequest(BaseModel):
     )
     dataset_type: Optional[str] = Field(
         None, description="personal | institute | startup (defaults to the type detected at inspect)"
+    )
+    monthly_income: Optional[float] = Field(
+        None, description="Monthly income (₹). Use when the file has no income rows, e.g. an expenses-only export."
     )
 
 
@@ -86,26 +89,6 @@ class BranchScenarioRequest(BaseModel):
 
 def _not_found(code: str, message: str) -> HTTPException:
     return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"error": code, "message": message})
-
-
-def _decode_csv(raw_bytes: bytes) -> str:
-    for enc in ("utf-8-sig", "utf-8", "cp1252"):
-        try:
-            return raw_bytes.decode(enc)
-        except UnicodeDecodeError:
-            continue
-    return raw_bytes.decode("latin-1", errors="replace")
-
-
-def _read_csv_head(text: str, n: int = 5) -> Tuple[List[str], List[Dict[str, Any]]]:
-    reader = csv.DictReader(io.StringIO(text))
-    headers = list(reader.fieldnames or [])
-    rows: List[Dict[str, Any]] = []
-    for i, row in enumerate(reader):
-        if i >= n:
-            break
-        rows.append(dict(row))
-    return headers, rows
 
 
 def _dataset_type_hint(filename: str) -> Optional[str]:
@@ -184,23 +167,37 @@ async def inspect_dataset(
     if not raw_bytes:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "EMPTY_FILE", "message": "Uploaded CSV file is empty."},
+            detail={"error": "EMPTY_FILE", "message": "The uploaded file is empty."},
+        )
+    if len(raw_bytes) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail={"error": "FILE_TOO_LARGE", "message": "Files up to 10 MB are supported."},
         )
 
     filename = file.filename or "upload.csv"
-    text = _decode_csv(raw_bytes)
-    headers, preview_rows = _read_csv_head(text, n=5)
-    if not headers:
-        raise HTTPException(
-            status_code=422,
-            detail={"error": "NO_HEADERS", "message": "Could not find a header row in the CSV."},
-        )
-
     from ai.agents.mapper import propose_mapping
+    from data.normalize import UnreadableFileError, load_table
 
-    result = propose_mapping(headers, preview_rows[:3], dataset_type_hint=_dataset_type_hint(filename))
+    try:
+        table = load_table(raw_bytes, filename)
+    except UnreadableFileError as exc:
+        raise HTTPException(status_code=422, detail={"error": "UNREADABLE_FILE", "message": str(exc)})
+
+    df = table.df
+    headers = list(df.columns)
+    sample = df.head(MAPPING_SAMPLE_ROWS).to_dict(orient="records")
+    preview_rows = df.head(5).to_dict(orient="records")
+
+    result = propose_mapping(headers, sample, dataset_type_hint=_dataset_type_hint(filename))
     proposed_mapping = result.mapping.to_dict()
     dataset_type = result.dataset_type if result.dataset_type in DATASET_TYPES else "personal"
+
+    notes: List[str] = []
+    if table.skipped_preamble_rows:
+        notes.append(f"Skipped {table.skipped_preamble_rows} line(s) above the header row.")
+    if not (proposed_mapping.get("amount_col") or proposed_mapping.get("debit_col") or proposed_mapping.get("credit_col")):
+        notes.append("Couldn't tell which column holds the amounts. Please pick it below.")
 
     upload_id = f"upl_{uuid.uuid4().hex[:16]}"
     Repository(db).save_upload(
@@ -221,6 +218,8 @@ async def inspect_dataset(
         "mapping_source": result.tier_used,
         "dataset_type": dataset_type,
         "preview_rows": preview_rows,
+        "row_count": int(len(df)),
+        "warnings": notes,
         "ttl_seconds": UPLOAD_TTL_MINUTES * 60,
     }
 
@@ -255,20 +254,23 @@ def commit_dataset(req: CommitRequest, db: Session = Depends(get_db)):
 
     try:
         instance = FinancialIngestor.compile(
-            csv_source=io.BytesIO(upload["csv_bytes"]),
+            csv_source=upload["csv_bytes"],
             mapping=ColumnMapping.from_dict(mapping),
             dataset_id=dataset_id,
             name=ds_name,
             starting_balance=req.starting_balance,
+            monthly_income=req.monthly_income,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={"error": "INGEST_FAILED", "message": str(exc)})
     except Exception as exc:
-        logger.warning(f"CSV compilation failed for {filename}: {exc}")
+        logger.exception(f"CSV compilation failed for {filename}: {exc}")
         raise HTTPException(
             status_code=422,
             detail={
                 "error": "INGEST_FAILED",
-                "message": "Could not compile the CSV with this column mapping. "
-                "Check the date, amount/debit/credit and category columns.",
+                "message": "Could not build a baseline from this file with this column mapping. "
+                "Check the date and amount (or debit/credit) columns.",
             },
         )
 
@@ -283,6 +285,7 @@ def commit_dataset(req: CommitRequest, db: Session = Depends(get_db)):
         "stats": record["stats"],
         "baseline_metrics": record["baseline_metrics"],
         "baseline_risks": _extract_baseline_risks(record["baseline_metrics"]),
+        "warnings": record["stats"]["warnings"],
     }
 
 

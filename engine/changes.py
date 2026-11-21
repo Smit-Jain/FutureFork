@@ -13,7 +13,7 @@ Provides:
 from __future__ import annotations
 
 import copy
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from engine.model import (
     FinancialProblemInstance,
@@ -67,9 +67,8 @@ def apply_emi_split(
     else:
         new_goal.downpayment = float(p.get("downpayment", 0.0))
 
-    new_goal.interest_rate_annual = float(
-        p.get("interest_rate_annual", p.get("interest_rate", new_goal.interest_rate_annual or 0.10))
-    )
+    rate = p.get("interest_rate_annual", p.get("interest_rate", new_goal.interest_rate_annual))
+    new_goal.interest_rate_annual = 0.10 if rate is None else float(rate)
     new_goal.target_month = int(p.get("target_month", new_goal.target_month))
     return new_goal
 
@@ -131,12 +130,23 @@ def apply_discretionary_trim(
     return new_goal
 
 
-BRANCH_TYPES = ("upfront", "emi", "phased", "trim")
+BRANCH_TYPES = ("upfront", "emi", "phased", "trim", "absorb", "delay", "phase_in")
+
+# Forks evaluated for each kind of decision (baseline is always added first)
+FORKS_BY_KIND = {
+    "one_time": ("upfront", "emi", "phased", "trim"),
+    "recurring_expense": ("absorb", "delay", "phase_in", "trim"),
+    "income_change": ("absorb", "trim"),
+}
 
 _BRANCH_ALIASES = {
+    # Order matters: more specific aliases first ("phased_delay" is phased, not delay)
+    "phase_in": ("phase_in", "ramp"),
+    "phased": ("phased", "phase", "milestone", "two_stage"),
+    "absorb": ("absorb", "commit_now", "start_now", "do_nothing"),
+    "delay": ("delay_start", "delay"),
     "upfront": ("upfront", "buy_now", "immediate"),
     "emi": ("emi", "lease", "loan", "installment", "instalment"),
-    "phased": ("phase", "delay", "milestone", "two_stage"),
     "trim": ("trim", "cut", "discretionary", "savings"),
 }
 
@@ -173,3 +183,66 @@ def apply_financial_change(
         "trim": apply_discretionary_trim,
     }
     return appliers[normalize_branch_type(change_type)](instance, base_goal, params)
+
+
+# ==============================================================================
+# DECISION ADJUSTMENTS (recurring costs and income changes)
+# ==============================================================================
+
+def _months_affected(goal: PurchaseGoal, T: int = 12) -> range:
+    start = max(0, min(T - 1, int(goal.start_month or 0)))
+    return range(start, min(T, start + max(1, int(goal.duration_months or T))))
+
+
+def recurring_schedule(goal: PurchaseGoal, start_month: Optional[int] = None,
+                       phase_in: bool = False, T: int = 12) -> List[float]:
+    """Monthly cost of a recurring commitment over the horizon (optionally ramped in at 50% for 3 months)."""
+    g = copy.copy(goal)
+    if start_month is not None:
+        g.start_month = start_month
+    sched = [0.0] * T
+    for i, t in enumerate(_months_affected(g, T)):
+        factor = 0.5 if phase_in and i < 3 else 1.0
+        sched[t] = round(float(goal.monthly_amount) * factor, 2)
+    return sched
+
+
+def adjust_instance(
+    instance: FinancialProblemInstance,
+    goal: PurchaseGoal,
+    recurring: Optional[List[float]] = None,
+) -> FinancialProblemInstance:
+    """
+    Returns a copy of the baseline with the decision applied:
+    - recurring_expense: adds the commitment as a new fixed category ("New: <label>").
+    - income_change: scales (or shifts) inflows in the affected months.
+    The original instance is never modified.
+    """
+    inst = copy.deepcopy(instance)
+    T = len(inst.months)
+    kind = goal.decision_kind
+
+    if kind == "recurring_expense":
+        sched = recurring if recurring is not None else recurring_schedule(goal, T=T)
+        label = f"New: {goal.item_name}"[:48]
+        inst.categories = list(inst.categories) + [label]
+        inst.category_types = {**inst.category_types, label: "fixed"}
+        inst.category_means = {**inst.category_means, label: round(sum(sched) / T, 2)}
+        inst.category_stds = {**inst.category_stds, label: 0.0}
+        inst.outflows = [list(row) + [sched[t]] for t, row in enumerate(inst.outflows)]
+    elif kind == "income_change":
+        months = set(_months_affected(goal, T))
+        inst.inflows = [
+            max(0.0, round(x * (1 + goal.income_change_pct / 100.0) + goal.income_change_monthly, 2))
+            if t in months else x
+            for t, x in enumerate(inst.inflows)
+        ]
+
+    inst.total_outflows = [round(sum(row), 2) for row in inst.outflows]
+    inst.net_cash_flows = [round(inst.inflows[t] - inst.total_outflows[t], 2) for t in range(T)]
+    bal, balances = inst.starting_balance, []
+    for net in inst.net_cash_flows:
+        bal += net
+        balances.append(round(bal, 2))
+    inst.cash_balances = balances
+    return inst

@@ -45,6 +45,9 @@ const FINANCIAL_COLORS: Record<BranchType, string> = {
   emi:      '#F59E0B',
   phased:   '#8B5CF6',
   trim:     '#F43F5E',
+  absorb:   '#06B6D4',
+  delay:    '#F59E0B',
+  phase_in: '#8B5CF6',
 };
 
 const FINANCIAL_LABELS: Record<BranchType, string> = {
@@ -52,7 +55,10 @@ const FINANCIAL_LABELS: Record<BranchType, string> = {
   upfront:  'Upfront Buy',
   emi:      'EMI / Instalments',
   phased:   'Phased Purchase',
-  trim:     'Trim & Buy',
+  trim:     'Trim Spending',
+  absorb:   'As Planned',
+  delay:    'Delay Start',
+  phase_in: 'Phase In',
 };
 
 // ─── Tooltip helper ──────────────────────────────────────────────────────────

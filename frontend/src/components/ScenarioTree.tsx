@@ -15,6 +15,9 @@ export const BRANCH_STYLES: Record<BranchType, { label: string; color: string; b
   emi: { label: 'EMI', color: '#F59E0B', badge: 'bg-amber-500/20 text-amber-300 border-amber-500/30' },
   phased: { label: 'Phased', color: '#8B5CF6', badge: 'bg-purple-500/20 text-purple-300 border-purple-500/30' },
   trim: { label: 'Trim', color: '#F43F5E', badge: 'bg-rose-500/20 text-rose-300 border-rose-500/30' },
+  absorb: { label: 'As planned', color: '#06B6D4', badge: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30' },
+  delay: { label: 'Delay', color: '#F59E0B', badge: 'bg-amber-500/20 text-amber-300 border-amber-500/30' },
+  phase_in: { label: 'Phase in', color: '#8B5CF6', badge: 'bg-purple-500/20 text-purple-300 border-purple-500/30' },
 };
 
 export const branchOf = (s: Scenario): BranchType =>
@@ -89,7 +92,9 @@ const NodeCard: React.FC<NodeCardProps> = ({ scenario, result, selected, onSelec
         </div>
       )}
 
-      <p className="text-[10px] text-slate-500 leading-snug mt-2.5 line-clamp-3">{scenario.description}</p>
+      <p className="text-[10px] text-slate-500 leading-snug mt-2.5 line-clamp-3">
+        {result?.description && result.branch_type !== 'baseline' ? result.description : scenario.description}
+      </p>
     </button>
   );
 };

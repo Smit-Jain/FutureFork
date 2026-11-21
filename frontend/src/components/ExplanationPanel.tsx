@@ -58,7 +58,10 @@ const POLICY_LABEL_MAP: Record<BranchType, string> = {
   upfront:  'Upfront Purchase',
   emi:      'EMI / Instalments',
   phased:   'Phased Purchase',
-  trim:     'Trim & Buy',
+  trim:     'Trim Spending',
+  absorb:   'As Planned',
+  delay:    'Delay the Start',
+  phase_in: 'Phase It In',
 };
 
 const POLICY_COLOR_MAP: Record<BranchType, string> = {
@@ -67,6 +70,9 @@ const POLICY_COLOR_MAP: Record<BranchType, string> = {
   emi:      'border-amber-500/30 bg-amber-500/5',
   phased:   'border-purple-500/30 bg-purple-500/5',
   trim:     'border-rose-500/30 bg-rose-500/5',
+  absorb:   'border-cyan-500/30 bg-cyan-500/5',
+  delay:    'border-amber-500/30 bg-amber-500/5',
+  phase_in: 'border-purple-500/30 bg-purple-500/5',
 };
 
 const SURVIVAL_COLOR = (pct: number) =>

@@ -13,12 +13,13 @@ a ColumnMapping into a validated FinancialProblemInstance:
 
 from __future__ import annotations
 
+import copy
 import io
 import re
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -27,6 +28,16 @@ import pandas as pd
 ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
+
+from data.normalize import (
+    UnreadableFileError,
+    detect_columns,
+    detect_currency,
+    flag_direction,
+    load_table,
+    parse_amount_series,
+)
+from data.normalize import parse_date_series as _normalize_parse_dates
 
 # Check if engine.model provides schema definitions; otherwise fallback to internal classes
 try:
@@ -220,97 +231,13 @@ def clean_currency_series(series: pd.Series) -> pd.Series:
 
 
 def parse_date_series(series: pd.Series, date_format: Optional[str] = None) -> pd.Series:
-    """
-    Robust date parser with fallback heuristics for DD/MM/YYYY vs YYYY-MM-DD.
-    """
-    s = series.astype(str).str.strip()
-    if date_format:
-        try:
-            parsed = pd.to_datetime(s, format=date_format, errors="coerce")
-            if parsed.notna().sum() > 0:
-                return parsed
-        except Exception:
-            pass
-
-    # Normalise DD-MM-YYYY / DD.MM.YYYY to DD/MM/YYYY. pandas infers ONE format from the first
-    # value, so a column mixing "28/04/2024" and "18-07-2024" would otherwise silently drop rows.
-    s = s.str.replace(r"^(\d{1,2})[-.](\d{1,2})[-.](\d{2,4})$", r"\1/\2/\3", regex=True)
-
-    # Try dayfirst=True first (predominant standard in India: DD/MM/YYYY or DD-MM-YYYY)
-    parsed = pd.to_datetime(s, dayfirst=True, errors="coerce")
-    # If more than 35% failed to parse, attempt standard ISO / dayfirst=False
-    if parsed.isna().mean() > 0.35:
-        parsed_iso = pd.to_datetime(s, dayfirst=False, errors="coerce")
-        if parsed_iso.isna().sum() < parsed.isna().sum():
-            parsed = parsed_iso
-
-    return parsed
+    """Backward-compatible wrapper around data.normalize.parse_date_series."""
+    return _normalize_parse_dates(series, date_format)
 
 
 def auto_detect_columns(df: pd.DataFrame) -> ColumnMapping:
-    """
-    Inspects DataFrame headers and sample values to produce an auto-detected ColumnMapping.
-    Used when ColumnMapping is missing or incomplete.
-    """
-    cols = list(df.columns)
-    cols_lower = {c: str(c).strip().lower() for c in cols}
-
-    date_col = "Date"
-    debit_col = None
-    credit_col = None
-    amount_col = None
-    category_col = None
-    description_col = None
-    type_col = None
-
-    for col, cl in cols_lower.items():
-        if not date_col or date_col == "Date":
-            if any(k in cl for k in ["date", "txn_date", "timestamp", "posting"]):
-                date_col = col
-
-        if not debit_col:
-            if any(k in cl for k in ["debit", "withdrawal", "expense", "dr", "paid_out", "outflow"]):
-                debit_col = col
-
-        if not credit_col:
-            if any(k in cl for k in ["credit", "deposit", "inflow", "cr", "received"]):
-                credit_col = col
-
-        if not amount_col:
-            if any(k in cl for k in ["amount", "net_amount", "txn_amount", "total"]):
-                amount_col = col
-
-        if not category_col:
-            if any(k in cl for k in ["category", "head", "expense_type", "account_head", "classification"]):
-                category_col = col
-
-        if not description_col:
-            if any(k in cl for k in ["description", "narration", "particulars", "details", "remark", "memo"]):
-                description_col = col
-
-        if not type_col:
-            if cl in ["type", "txn_type", "transaction_type", "cr/dr"]:
-                type_col = col
-
-    # Fallbacks if still not found
-    if not date_col and len(cols) > 0:
-        date_col = cols[0]
-    if not debit_col and not amount_col:
-        # Search for first numeric column
-        for col in cols:
-            if col != date_col:
-                amount_col = col
-                break
-
-    return ColumnMapping(
-        date_col=date_col,
-        debit_col=debit_col,
-        credit_col=credit_col,
-        amount_col=amount_col,
-        category_col=category_col,
-        description_col=description_col,
-        type_col=type_col,
-    )
+    """Backward-compatible wrapper around data.normalize.detect_columns."""
+    return detect_columns(df).mapping
 
 
 def tag_category(category_name: str, monthly_values: Optional[np.ndarray] = None) -> str:
@@ -339,64 +266,94 @@ def tag_category(category_name: str, monthly_values: Optional[np.ndarray] = None
     return "flexible"
 
 
+_INCOME_HINT_RE = re.compile(
+    r"\b(?:salary|sal\b|income|revenue|refund|interest|dividend|cashback|credited|deposit|received|receipt|"
+    r"fees?\s+(?:received|collected)|grant|mrr|sales|payout|reimburse|bonus\s+credit)",
+    re.IGNORECASE,
+)
+
+MAX_CATEGORIES = 8
+
+
 class FinancialIngestor:
     """
-    High-performance, defensive Pandas compiler that parses financial CSV bytes
-    into a validated FinancialProblemInstance.
+    Compiles any supported financial export (CSV/TSV/Excel) into a validated
+    12-month FinancialProblemInstance (Node 0 baseline).
+
+    - Uses the most recent 12 months when more history is available.
+    - Projects shorter histories forward from the observed monthly averages.
+    - Infers the opening balance from a running-balance column when one exists.
+    - Records human-readable warnings in raw_metadata["warnings"].
     """
 
     @staticmethod
-    def read_csv(csv_source: Union[bytes, str, Path, io.BytesIO, io.StringIO]) -> pd.DataFrame:
-        """
-        Loads CSV content into a pandas DataFrame supporting bytes, file paths, or streams.
-        Tries encoding fallbacks: utf-8-sig, utf-8, latin-1, cp1252.
-        """
-        raw_bytes: bytes
+    def _to_bytes(src: Union[bytes, str, Path, io.BytesIO, io.StringIO]) -> bytes:
+        if isinstance(src, (str, Path)) and len(str(src)) < 1024 and Path(str(src)).is_file():
+            return Path(str(src)).read_bytes()
+        if isinstance(src, bytes):
+            return src
+        if isinstance(src, (io.BytesIO, io.BufferedReader)):
+            return src.read()
+        if isinstance(src, io.StringIO):
+            return src.getvalue().encode("utf-8")
+        if isinstance(src, str):
+            return src.encode("utf-8")
+        raise ValueError(f"Unsupported source type: {type(src)}")
 
-        if isinstance(csv_source, (str, Path)) and Path(str(csv_source)).is_file():
-            raw_bytes = Path(str(csv_source)).read_bytes()
-        elif isinstance(csv_source, bytes):
-            raw_bytes = csv_source
-        elif isinstance(csv_source, (io.BytesIO, io.BufferedReader)):
-            raw_bytes = csv_source.read()
-        elif isinstance(csv_source, io.StringIO):
-            raw_bytes = csv_source.getvalue().encode("utf-8")
-        elif isinstance(csv_source, str):
-            raw_bytes = csv_source.encode("utf-8")
-        else:
-            raise ValueError(f"Unsupported csv_source type: {type(csv_source)}")
-
-        # Encoding fallback pipeline
-        encodings = ["utf-8-sig", "utf-8", "latin-1", "cp1252"]
-        decoded_text: Optional[str] = None
-        for enc in encodings:
-            try:
-                decoded_text = raw_bytes.decode(enc)
-                break
-            except (UnicodeDecodeError, LookupError):
-                continue
-
-        if decoded_text is None:
-            decoded_text = raw_bytes.decode("utf-8", errors="replace")
-
-        if not decoded_text.strip():
-            return pd.DataFrame()
-
-        # Read CSV with defensive parsing
+    @classmethod
+    def read_csv(cls, csv_source: Union[bytes, str, Path, io.BytesIO, io.StringIO]) -> pd.DataFrame:
+        """Backward-compatible: returns the normalised table (empty DataFrame if unreadable)."""
         try:
-            df = pd.read_csv(
-                io.StringIO(decoded_text),
-                skipinitialspace=True,
-                low_memory=False,
-            )
-        except (pd.errors.EmptyDataError, ValueError):
+            return load_table(cls._to_bytes(csv_source)).df
+        except UnreadableFileError:
             return pd.DataFrame()
 
-        # Clean column headers
-        df.columns = [str(c).strip() for c in df.columns]
-        # Drop completely blank rows
-        df = df.dropna(how="all").reset_index(drop=True)
-        return df
+    @staticmethod
+    def _signed_flows(df: pd.DataFrame, m: ColumnMapping) -> Tuple[pd.Series, pd.Series, List[str]]:
+        """Returns (inflow, outflow, notes) as non-negative floats per row."""
+        notes: List[str] = []
+        zeros = pd.Series(0.0, index=df.index)
+
+        if m.debit_col in df and m.credit_col in df:
+            out, _ = parse_amount_series(df[m.debit_col])
+            inn, _ = parse_amount_series(df[m.credit_col])
+            return inn.abs().fillna(0.0), out.abs().fillna(0.0), notes
+
+        amount_col = m.amount_col if m.amount_col in df else (m.debit_col if m.debit_col in df else m.credit_col)
+        if amount_col not in df:
+            raise ValueError("No amount, debit or credit column could be found in the file.")
+        vals, drcr = parse_amount_series(df[amount_col])
+        vals = vals.fillna(0.0)
+
+        if m.debit_col in df and amount_col == m.debit_col:
+            return zeros, vals.abs(), notes
+        if m.credit_col in df and amount_col == m.credit_col:
+            return vals.abs(), zeros, notes
+
+        if m.type_col and m.type_col in df:
+            dirs = df[m.type_col].map(flag_direction)
+            signed = np.where(dirs == 1, vals.abs(), np.where(dirs == -1, -vals.abs(), vals))
+            signed = pd.Series(signed, index=df.index)
+        elif (drcr != 0).any():
+            signed = pd.Series(np.where(drcr != 0, drcr * vals.abs(), vals), index=df.index)
+        elif (vals < 0).any():
+            signed = vals
+        else:
+            text_cols = [c for c in (m.category_col, m.description_col) if c and c in df]
+            if text_cols:
+                text = df[text_cols].astype(str).agg(" ".join, axis=1)
+                is_income = text.str.contains(_INCOME_HINT_RE)
+            else:
+                is_income = pd.Series(False, index=df.index)
+            signed = pd.Series(np.where(is_income, vals.abs(), -vals.abs()), index=df.index)
+            if is_income.any():
+                notes.append(
+                    "All amounts were positive, so rows mentioning salary, income, revenue, refunds or "
+                    "interest were treated as income and the rest as spending."
+                )
+            else:
+                notes.append("All amounts were positive and none looked like income, so every row was treated as spending.")
+        return signed.clip(lower=0.0), (-signed).clip(lower=0.0), notes
 
     @classmethod
     def compile(
@@ -406,271 +363,219 @@ class FinancialIngestor:
         dataset_id: str = "dataset_node0",
         name: str = "Financial Dataset",
         starting_balance: Optional[float] = None,
+        monthly_income: Optional[float] = None,
     ) -> FinancialProblemInstance:
-        """
-        Compile raw CSV into FinancialProblemInstance.
-        Execution benchmark: < 200ms per CSV.
-        """
-        df = cls.read_csv(csv_source)
+        """Compile a financial export into a 12-month FinancialProblemInstance."""
+        try:
+            table = load_table(cls._to_bytes(csv_source))
+        except UnreadableFileError as exc:
+            raise ValueError(str(exc)) from exc
+        df = table.df.copy()
+        warnings_: List[str] = []
+        if table.skipped_preamble_rows:
+            warnings_.append(f"Skipped {table.skipped_preamble_rows} line(s) above the header row.")
 
-        if df.empty:
-            raise ValueError("CSV dataset is empty; cannot compile FinancialProblemInstance.")
-
-        # Normalize column mapping
+        # --- Column mapping (fill any missing role from detection) -----------
+        detected = detect_columns(df)
         if mapping is None:
-            col_map = auto_detect_columns(df)
+            col_map = copy.deepcopy(detected.mapping)
         elif isinstance(mapping, dict):
             col_map = ColumnMapping.from_dict(mapping)
-        elif isinstance(mapping, ColumnMapping):
-            col_map = mapping
         else:
-            col_map = auto_detect_columns(df)
-
+            col_map = copy.deepcopy(mapping)
+        if col_map.date_col not in df:
+            col_map.date_col = detected.mapping.date_col
+        if not any(c and c in df for c in (col_map.amount_col, col_map.debit_col, col_map.credit_col)):
+            for attr in ("amount_col", "debit_col", "credit_col", "type_col"):
+                setattr(col_map, attr, getattr(detected.mapping, attr))
         if starting_balance is not None:
             col_map.starting_balance = float(starting_balance)
+        if col_map.date_col not in df:
+            raise ValueError("No date column could be found in the file.")
 
-        # 1. Parse Dates and build monthly periods
-        date_col = col_map.date_col
-        if date_col not in df.columns:
-            # Fallback search for date column
-            detected = auto_detect_columns(df)
-            date_col = detected.date_col
+        # --- Dates -----------------------------------------------------------
+        dates = parse_date_series(df[col_map.date_col], col_map.date_format)
+        valid = dates.notna()
+        if not valid.any():
+            raise ValueError(f"None of the values in column '{col_map.date_col}' could be read as dates.")
+        if (~valid).sum():
+            warnings_.append(f"Ignored {int((~valid).sum())} row(s) without a readable date (for example totals or notes).")
+        df = df[valid].copy()
+        df["_date"] = dates[valid]
 
-        df["_parsed_date"] = parse_date_series(df[date_col], date_format=col_map.date_format)
+        # --- Money in / out --------------------------------------------------
+        inflow, outflow, notes = cls._signed_flows(df, col_map)
+        warnings_ += notes
+        df["_in"], df["_out"] = inflow.values, outflow.values
 
-        # Drop rows where date could not be parsed
-        valid_date_mask = df["_parsed_date"].notna()
-        if not valid_date_mask.any():
-            # If all dates failed, synthesize 12 sequential monthly buckets across rows
-            n_rows = len(df)
-            rows_per_month = max(1, n_rows // 12)
-            month_indices = [min(11, i // rows_per_month) for i in range(n_rows)]
-            df["_month_idx"] = month_indices
-            all_12_months = [f"Month {m}" for m in range(12)]
-        else:
-            df = df[valid_date_mask].copy()
-            df["_ym"] = df["_parsed_date"].dt.to_period("M")
+        # Chronological order (bank exports are often newest-first)
+        if df["_date"].iloc[0] > df["_date"].iloc[-1]:
+            df = df.iloc[::-1]
+        df = df.sort_values("_date", kind="mergesort").reset_index(drop=True)
 
-            unique_periods = sorted(df["_ym"].unique())
-            if len(unique_periods) >= 12:
-                # Use the 12 most recent consecutive months
-                start_p = unique_periods[-12]
-                selected_periods = pd.period_range(start=start_p, periods=12, freq="M")
-            elif len(unique_periods) > 0:
-                # Pad to 12 consecutive months starting from min period
-                start_p = unique_periods[0]
-                selected_periods = pd.period_range(start=start_p, periods=12, freq="M")
-            else:
-                selected_periods = pd.period_range(start="2024-04", periods=12, freq="M")
-
-            all_12_months = [str(p) for p in selected_periods]
-            period_to_idx = {p: i for i, p in enumerate(selected_periods)}
-
-            df["_month_idx"] = df["_ym"].map(period_to_idx)
-            # Filter out records outside the 12-month window
-            df = df[df["_month_idx"].notna()].copy()
-            df["_month_idx"] = df["_month_idx"].astype(int)
-
-        # 2. Extract Inflow and Outflow amounts
-        if col_map.debit_col and col_map.debit_col in df.columns and col_map.credit_col and col_map.credit_col in df.columns:
-            df["_outflow"] = clean_currency_series(df[col_map.debit_col]).abs()
-            df["_inflow"] = clean_currency_series(df[col_map.credit_col]).abs()
-        elif col_map.amount_col and col_map.amount_col in df.columns:
-            raw_amt = clean_currency_series(df[col_map.amount_col])
-            # Check if there is an explicit type column
-            type_col = col_map.type_col or (auto_detect_columns(df).type_col)
-            if type_col and type_col in df.columns:
-                t_str = df[type_col].astype(str).str.lower()
-                is_credit = t_str.str.contains(r"credit|deposit|inflow|cr|income", regex=True)
-                df["_inflow"] = np.where(is_credit, raw_amt.abs(), 0.0)
-                df["_outflow"] = np.where(~is_credit, raw_amt.abs(), 0.0)
-            else:
-                # Check sign: if negatives exist, treat negative as outflow, positive as inflow
-                if (raw_amt < 0).any():
-                    df["_outflow"] = np.where(raw_amt < 0, raw_amt.abs(), 0.0)
-                    df["_inflow"] = np.where(raw_amt > 0, raw_amt, 0.0)
-                else:
-                    # All positive amounts: if category has salary/grant/inflow keywords, assign to inflow
-                    cat_col = col_map.category_col
-                    if cat_col and cat_col in df.columns:
-                        c_str = df[cat_col].astype(str).str.lower()
-                        is_inflow_cat = c_str.str.contains(r"salary|fee|grant|revenue|invoice|income|deposit", regex=True)
-                        df["_inflow"] = np.where(is_inflow_cat, raw_amt, 0.0)
-                        df["_outflow"] = np.where(~is_inflow_cat, raw_amt, 0.0)
-                    else:
-                        # Default all positive to outflow
-                        df["_outflow"] = raw_amt
-                        df["_inflow"] = 0.0
-        else:
-            # Fallback: find any numeric column
-            numeric_cols = [c for c in df.columns if c not in [date_col, "_parsed_date", "_ym", "_month_idx"]]
-            if numeric_cols:
-                raw_amt = clean_currency_series(df[numeric_cols[0]])
-                df["_outflow"] = raw_amt.abs()
-                df["_inflow"] = 0.0
-            else:
-                df["_outflow"] = 0.0
-                df["_inflow"] = 0.0
-
-        # 3. Extract and Clean Categories
-        cat_col = col_map.category_col
-        if cat_col and cat_col in df.columns:
-            raw_cats = df[cat_col].astype(str).str.strip()
-        else:
-            # Infer category from description if available
-            desc_col = col_map.description_col
-            if desc_col and desc_col in df.columns:
-                raw_cats = df[desc_col].astype(str).apply(cls._infer_category_from_desc)
-            else:
-                raw_cats = pd.Series(["General Expense"] * len(df))
-
-        df["_category"] = raw_cats.replace(r"^(nan|None|\s*)$", "Uncategorized", regex=True)
-
-        # 4. Consolidate into Exactly 8 Canonical Categories
-        # Consider only outflow records for category sizing
-        outflow_df = df[df["_outflow"] > 0].copy()
-
-        if outflow_df.empty:
-            chosen_categories = DEFAULT_CANONICAL_CATEGORIES.copy()
-        else:
-            cat_totals = outflow_df.groupby("_category")["_outflow"].sum().sort_values(ascending=False)
-            unique_cats = list(cat_totals.index)
-
-            if len(unique_cats) > 8:
-                # Top 7 categories preserved; long tail grouped into "Other / Discretionary"
-                top_7 = unique_cats[:7]
-                df["_category_consolidated"] = df["_category"].apply(
-                    lambda c: c if c in top_7 else "Other / Discretionary"
-                )
-                chosen_categories = top_7 + ["Other / Discretionary"]
-            elif len(unique_cats) == 8:
-                df["_category_consolidated"] = df["_category"]
-                chosen_categories = unique_cats
-            else:
-                # Fewer than 8 categories: pad with default canonical categories
-                df["_category_consolidated"] = df["_category"]
-                chosen_categories = list(unique_cats)
-                for def_cat in DEFAULT_CANONICAL_CATEGORIES:
-                    if def_cat not in chosen_categories:
-                        chosen_categories.append(def_cat)
-                    if len(chosen_categories) == 8:
-                        break
-
-        # Ensure chosen_categories is strictly length 8
-        chosen_categories = chosen_categories[:8]
-        while len(chosen_categories) < 8:
-            chosen_categories.append(f"Category {len(chosen_categories) + 1}")
-
-        # 5. Build 12 x 8 Outflow Matrix
-        # Pivot by month index (0..11) and category
-        if not outflow_df.empty:
-            outflow_records = df[df["_outflow"] > 0]
-            pivot = outflow_records.pivot_table(
-                index="_month_idx",
-                columns="_category_consolidated",
-                values="_outflow",
-                aggfunc="sum",
-                fill_value=0.0,
+        # --- Opening balance -------------------------------------------------
+        opening: Optional[float] = None
+        if starting_balance is not None:
+            opening = float(starting_balance)
+        elif col_map.balance_col and col_map.balance_col in df:
+            bal, _ = parse_amount_series(df[col_map.balance_col])
+            idx = bal.first_valid_index()
+            if idx is not None:
+                opening = float(bal[idx] - (df.at[idx, "_in"] - df.at[idx, "_out"]))
+                # Rows before the first readable balance happened before it
+                opening -= float((df.loc[: idx - 1, "_in"] - df.loc[: idx - 1, "_out"]).sum()) if idx > 0 else 0.0
+                warnings_.append(f"Opening balance of {opening:,.0f} inferred from the '{col_map.balance_col}' column.")
+        elif col_map.starting_balance:
+            opening = float(col_map.starting_balance)
+        if opening is None:
+            opening = 0.0
+            warnings_.append(
+                "Opening balance unknown, so it was assumed to be 0. Enter your current balance for accurate results."
             )
-            pivot = pivot.reindex(index=range(12), columns=chosen_categories, fill_value=0.0)
-            outflow_matrix = pivot.values.astype(np.float64)
+
+        # --- 12-month window -------------------------------------------------
+        periods = df["_date"].dt.to_period("M")
+        first_p, last_p = periods.min(), periods.max()
+        span = (last_p - first_p).n + 1
+        if span >= 12:
+            window_start = last_p - 11
+            observed = 12
+            before = periods < window_start
+            opening += float((df.loc[before, "_in"] - df.loc[before, "_out"]).sum())
+            df, periods = df[~before], periods[~before]
         else:
-            outflow_matrix = np.zeros((12, 8), dtype=np.float64)
+            window_start = first_p
+            observed = span
+        window = pd.period_range(start=window_start, periods=12, freq="M")
+        months = [str(p) for p in window]
+        df = df.copy()
+        df["_m"] = [(p - window_start).n for p in periods]
+        projected = list(range(observed, 12))
+        if projected:
+            warnings_.append(
+                f"Only {observed} month(s) of data found; months {months[observed]} to {months[-1]} are "
+                f"projected from your average monthly income and spending."
+            )
 
-        # Round and ensure non-negative
+        # --- Categories ------------------------------------------------------
+        if col_map.category_col and col_map.category_col in df:
+            cats = df[col_map.category_col].astype(str).str.strip()
+        elif col_map.description_col and col_map.description_col in df:
+            cats = df[col_map.description_col].astype(str).map(cls._infer_category_from_desc)
+        else:
+            cats = pd.Series("General Spending", index=df.index)
+        df["_cat"] = cats.replace(r"^(nan|None|null|)$", "Uncategorized", regex=True).values
+
+        spend = df[df["_out"] > 0]
+        totals = spend.groupby("_cat")["_out"].sum().sort_values(ascending=False)
+        if len(totals) > MAX_CATEGORIES:
+            keep = list(totals.index[: MAX_CATEGORIES - 1])
+            df["_cat"] = df["_cat"].where(df["_cat"].isin(keep), "Other / Discretionary")
+            categories = keep + ["Other / Discretionary"]
+        else:
+            categories = list(totals.index) or ["General Spending"]
+
+        # --- Matrices (observed months, then projection) ---------------------
+        out_obs = (
+            df[df["_out"] > 0].pivot_table(index="_m", columns="_cat", values="_out", aggfunc="sum", fill_value=0.0)
+            .reindex(index=range(observed), columns=categories, fill_value=0.0)
+            .to_numpy(dtype=np.float64)
+        )
+        in_obs = df.groupby("_m")["_in"].sum().reindex(range(observed), fill_value=0.0).to_numpy(dtype=np.float64)
+
+        if monthly_income is not None and monthly_income > 0:
+            in_obs = np.full(observed, float(monthly_income))
+            warnings_.append(f"Using the monthly income you entered ({monthly_income:,.0f}) instead of the file's income rows.")
+
+        outflow_matrix = np.zeros((12, len(categories)))
+        outflow_matrix[:observed] = out_obs
+        inflow_vector = np.zeros(12)
+        inflow_vector[:observed] = in_obs
+        if projected:
+            outflow_matrix[observed:] = out_obs.mean(axis=0)
+            inflow_vector[observed:] = in_obs.mean()
         outflow_matrix = np.maximum(0.0, np.round(outflow_matrix, 2))
+        inflow_vector = np.maximum(0.0, np.round(inflow_vector, 2))
 
-        # 6. Build 12-element Inflow Vector
-        inflow_series = df.groupby("_month_idx")["_inflow"].sum()
-        inflow_vector = np.zeros(12, dtype=np.float64)
-        for m_idx in range(12):
-            inflow_vector[m_idx] = round(float(inflow_series.get(m_idx, 0.0)), 2)
+        if inflow_vector.sum() <= 0:
+            warnings_.append("No income found in the file. Add your monthly income to see a realistic forecast.")
+        if outflow_matrix.sum() <= 0:
+            warnings_.append("No spending found in the file.")
 
-        # 7. Auto-Tagging: Fixed vs Flexible
+        currency = detect_currency(
+            df[[c for c in (col_map.amount_col, col_map.debit_col, col_map.credit_col) if c and c in df]].stack(),
+            list(table.df.columns),
+        )
+        if currency and currency != "INR":
+            warnings_.append(f"Amounts look like {currency}; they are shown with ₹ but the numbers are used as-is.")
+
+        # --- Tags and statistics from observed months only -------------------
         category_types: Dict[str, str] = {}
         category_means: Dict[str, float] = {}
         category_stds: Dict[str, float] = {}
+        for j, cat in enumerate(categories):
+            vals = out_obs[:, j]
+            category_types[cat] = tag_category(cat, vals)
+            mu = float(np.mean(vals)) if len(vals) else 0.0
+            sigma = float(np.std(vals, ddof=1)) if len(vals) > 1 else 0.0
+            category_means[cat] = round(mu if np.isfinite(mu) else 0.0, 2)
+            category_stds[cat] = round(sigma if np.isfinite(sigma) else 0.0, 2)
 
-        for j, cat in enumerate(chosen_categories):
-            col_vals = outflow_matrix[:, j]
-            tag = tag_category(cat, col_vals)
-            category_types[cat] = tag
-
-            mu = float(np.mean(col_vals))
-            sigma = float(np.std(col_vals, ddof=1)) if len(col_vals) > 1 else 0.0
-            # Clean up zero-variance or NaN edge cases
-            category_means[cat] = round(0.0 if np.isnan(mu) or np.isinf(mu) else mu, 2)
-            category_stds[cat] = round(0.0 if np.isnan(sigma) or np.isinf(sigma) else max(0.0, sigma), 2)
-
-        # 8. Monthly Aggregates, Balances, and Summary
-        total_outflows = [round(float(x), 2) for x in np.sum(outflow_matrix, axis=1)]
-        net_cash_flows = [
-            round(float(inflow_vector[i] - total_outflows[i]), 2) for i in range(12)
-        ]
-
-        curr_bal = col_map.starting_balance
+        total_outflows = [round(float(x), 2) for x in outflow_matrix.sum(axis=1)]
+        net_cash_flows = [round(float(inflow_vector[i] - total_outflows[i]), 2) for i in range(12)]
+        bal = opening
         cash_balances: List[float] = []
         for net in net_cash_flows:
-            curr_bal += net
-            cash_balances.append(round(float(curr_bal), 2))
+            bal += net
+            cash_balances.append(round(bal, 2))
 
-        total_inflow = round(float(np.sum(inflow_vector)), 2)
-        total_outflow = round(float(np.sum(outflow_matrix)), 2)
-        net_cash_flow = round(total_inflow - total_outflow, 2)
-        ending_balance = cash_balances[-1] if cash_balances else col_map.starting_balance
-
-        monthly_outflow_mean = round(float(np.mean(total_outflows)), 2)
-        monthly_outflow_std = round(float(np.std(total_outflows, ddof=1)), 2) if len(total_outflows) > 1 else 0.0
-        monthly_inflow_mean = round(float(np.mean(inflow_vector)), 2)
-        monthly_inflow_std = round(float(np.std(inflow_vector, ddof=1)), 2) if len(inflow_vector) > 1 else 0.0
-
-        # Fixed expense ratio
-        fixed_cats = [cat for cat, t in category_types.items() if t == "fixed"]
-        fixed_annual_sum = sum(category_means[c] * 12 for c in fixed_cats)
-        fixed_ratio = round(fixed_annual_sum / total_outflow, 4) if total_outflow > 0 else 0.0
-
-        # Runway calculation: if burn rate > 0 and net deficit
-        burn_rate = monthly_outflow_mean
-        runway_months = None
-        if ending_balance > 0 and monthly_outflow_mean > monthly_inflow_mean:
-            net_monthly_burn = monthly_outflow_mean - monthly_inflow_mean
-            if net_monthly_burn > 0:
-                runway_months = round(ending_balance / net_monthly_burn, 1)
-
+        total_inflow = round(float(inflow_vector.sum()), 2)
+        total_outflow = round(float(outflow_matrix.sum()), 2)
+        monthly_out = float(np.mean(total_outflows))
+        monthly_in = float(np.mean(inflow_vector))
+        fixed = [c for c, t in category_types.items() if t == "fixed"]
         summary = {
             "total_inflow": total_inflow,
             "total_outflow": total_outflow,
-            "net_cash_flow": net_cash_flow,
-            "starting_balance": col_map.starting_balance,
-            "ending_balance": ending_balance,
-            "monthly_outflow_mean": monthly_outflow_mean,
-            "monthly_outflow_std": monthly_outflow_std,
-            "monthly_inflow_mean": monthly_inflow_mean,
-            "monthly_inflow_std": monthly_inflow_std,
-            "burn_rate": burn_rate,
-            "runway_months": runway_months,
-            "fixed_expense_ratio": fixed_ratio,
-            "num_fixed_categories": len(fixed_cats),
-            "num_flexible_categories": 8 - len(fixed_cats),
+            "net_cash_flow": round(total_inflow - total_outflow, 2),
+            "starting_balance": round(opening, 2),
+            "ending_balance": cash_balances[-1],
+            "monthly_outflow_mean": round(monthly_out, 2),
+            "monthly_outflow_std": round(float(np.std(total_outflows, ddof=1)), 2),
+            "monthly_inflow_mean": round(monthly_in, 2),
+            "monthly_inflow_std": round(float(np.std(inflow_vector, ddof=1)), 2),
+            "burn_rate": round(monthly_out, 2),
+            "runway_months": (
+                round(cash_balances[-1] / (monthly_out - monthly_in), 1)
+                if cash_balances[-1] > 0 and monthly_out > monthly_in else None
+            ),
+            "fixed_expense_ratio": round(sum(category_means[c] * 12 for c in fixed) / total_outflow, 4) if total_outflow else 0.0,
+            "num_fixed_categories": len(fixed),
+            "num_flexible_categories": len(categories) - len(fixed),
         }
-
+        col_map.starting_balance = round(opening, 2)
         raw_metadata = {
             "dataset_id": dataset_id,
             "name": name,
-            "source_rows": len(df),
-            "date_range": [all_12_months[0], all_12_months[-1]],
+            "source_rows": int(len(df)),
+            "source_format": table.source_format,
+            "date_range": [months[0], months[-1]],
+            "observed_months": observed,
+            "projected_months": projected,
+            "currency": currency or "INR",
             "detected_mapping": col_map.to_dict(),
+            "warnings": warnings_,
         }
 
         return FinancialProblemInstance(
             dataset_id=dataset_id,
             name=name,
-            months=all_12_months,
-            categories=chosen_categories,
+            months=months,
+            categories=categories,
             category_types=category_types,
             outflows=outflow_matrix.tolist(),
             inflows=inflow_vector.tolist(),
-            starting_balance=col_map.starting_balance,
+            starting_balance=round(opening, 2),
             category_means=category_means,
             category_stds=category_stds,
             total_outflows=total_outflows,

@@ -223,11 +223,14 @@ def test_defensive_encoding_and_malformed_csv():
     mapping = ColumnMapping(date_col="Date", category_col="Category", debit_col="Debit", credit_col="Credit")
     inst = FinancialIngestor.compile(csv_content, mapping=mapping)
     assert isinstance(inst, FinancialProblemInstance)
-    assert len(inst.categories) == 8
-    assert inst.outflow_matrix.shape == (12, 8)
+    # Only the categories present in the file are kept (no zero-filled padding)
+    assert inst.categories == ["Rent", "Marketing"]
+    assert inst.outflow_matrix.shape == (12, 2)
+    # 3 months observed; the rest projected from the average
+    assert inst.raw_metadata["observed_months"] == 3
 
-    # Empty CSV should raise ValueError
-    with pytest.raises(ValueError, match="CSV dataset is empty"):
+    # Empty file should raise ValueError
+    with pytest.raises(ValueError, match="empty"):
         FinancialIngestor.compile(b"")
 
 

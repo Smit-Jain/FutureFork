@@ -465,6 +465,24 @@ def run_numeric_guard(
 # ===========================================================================
 
 
+def fmt_inr_signed(amount: float) -> str:
+    """Like fmt_inr, but keeps the minus sign for negative amounts."""
+    return ("-" if amount < 0 else "") + fmt_inr(abs(amount))
+
+
+_BRANCH_ORDER = ["upfront", "emi", "phased", "absorb", "delay", "phase_in", "trim"]
+
+
+def _result_field(r: Any, name: str, default: Any = None) -> Any:
+    if r is None:
+        return default
+    if hasattr(r, name):
+        return getattr(r, name)
+    if isinstance(r, dict):
+        return r.get(name, default)
+    return default
+
+
 def _build_template_explanation(
     decision: Any,
     branch_results: Dict[str, Any],
@@ -473,117 +491,97 @@ def _build_template_explanation(
     allowed_months: Set[int],
 ) -> str:
     """
-    Build a fully deterministic template explanation from real data.
+    Deterministic explanation built only from engine results.
 
-    All numbers drawn directly from branch_results metrics.
-    Uses fmt_inr() only for amounts that are in allowed_money.
-
-    Args:
-        decision:       ParsedDecision.
-        branch_results: dict[str, ScenarioEvaluationResult].
-        allowed_money:  Pre-built allowed money set.
-        allowed_pcts:   Pre-built allowed percent set.
-        allowed_months: Pre-built allowed month set.
-
-    Returns:
-        Plain-English explanation string.
+    Works for every decision kind: one-time purchases, recurring costs and income changes.
+    Every number it prints is added to the allowed sets, so the Numeric Guard passes by construction.
     """
+    from ai.agents.scenario import fork_metadata
 
-    def _get_metrics(scenario_id: str) -> Dict[str, Any]:
-        r = branch_results.get(scenario_id)
-        if r is None:
-            return {}
-        if hasattr(r, "metrics"):
-            return r.metrics or {}
-        if isinstance(r, dict):
-            return r.get("metrics") or {}
-        return {}
+    kind = getattr(decision, "decision_kind", "one_time") if decision else "one_time"
+    floor = float(getattr(decision, "emergency_floor", 0.0) or 0.0) if decision else 0.0
 
-    def _get_purchase_month(scenario_id: str) -> int:
-        r = branch_results.get(scenario_id)
-        if r is None:
-            return 0
-        if hasattr(r, "purchase_month"):
-            return int(r.purchase_month)
-        if isinstance(r, dict):
-            return int(r.get("purchase_month", 0))
-        return 0
+    def money(v: float) -> str:
+        allowed_money.add(abs(round(v, 2)))
+        allowed_money.add(round(v, 2))
+        return fmt_inr_signed(v)
 
-    # Gather per-fork metrics
-    fork_data: Dict[str, Dict[str, Any]] = {}
-    for fid in ["upfront", "emi", "phased", "trim"]:
-        m = _get_metrics(fid)
-        lb = float(m.get("lowest_balance") or 0.0)
-        # Try property if available (ScenarioEvaluationResult.lowest_balance)
-        r = branch_results.get(fid)
-        if r is not None and hasattr(r, "lowest_balance"):
-            lb = float(r.lowest_balance)
-        fork_data[fid] = {
-            "survival": float(m.get("survival_score_pct", 0.0)),
-            "cash_out_risk": float(m.get("cash_out_risk_pct", 0.0)),
-            "lowest_balance": lb,
-            "purchase_month": _get_purchase_month(fid),
-        }
+    def pct(v: float) -> str:
+        allowed_pcts.add(float(v))
+        return f"{float(v):.1f}%"
 
-    item_label = getattr(decision, "item_label", "Capital Purchase") if decision else "Capital Purchase"
-    total_cost = getattr(decision, "total_cost", 0.0) if decision else 0.0
-    floor = getattr(decision, "emergency_floor", 0.0) if decision else 0.0
+    rows: List[Tuple[str, Dict[str, Any]]] = []
+    for fid in sorted((k for k in branch_results if k != "baseline"),
+                      key=lambda k: _BRANCH_ORDER.index(k) if k in _BRANCH_ORDER else 99):
+        m = _result_field(branch_results[fid], "metrics", {}) or {}
+        rows.append((fid, m))
 
-    # Pre-populate allowed sets with ALL values we will display, so the guard passes.
-    # Use abs() for balances since fmt_inr always displays positive amounts.
-    if total_cost > 0:
-        allowed_money.add(total_cost)
-    if floor > 0:
-        allowed_money.add(floor)
-    for fid in ["upfront", "emi", "phased", "trim"]:
-        lb = fork_data[fid]["lowest_balance"]
-        lb_abs = abs(lb)
-        if lb_abs > 0:
-            allowed_money.add(lb_abs)
-        allowed_pcts.add(fork_data[fid]["survival"])
-        allowed_pcts.add(fork_data[fid]["cash_out_risk"])
+    understood = getattr(decision, "understood", "") if decision else ""
+    lines: List[str] = [understood or f"Decision: {getattr(decision, 'item_label', 'this decision')}", ""]
 
-    fork_labels = {
-        "upfront": "Upfront Purchase",
-        "emi": "EMI / Installment",
-        "phased": "Phased Purchase",
-        "trim": "Trim and Buy",
-    }
-
-    lines = [
-        f"FutureFork Financial Analysis — {item_label}",
-        "",
-        f"Cost: {fmt_inr(total_cost)} | Emergency floor: {fmt_inr(floor)}",
-        "",
-        "Branch-by-Branch Summary:",
-    ]
-
-    for fid in ["upfront", "emi", "phased", "trim"]:
-        d = fork_data[fid]
-        survival_str = f"{d['survival']:.1f}%"
-        risk_str = f"{d['cash_out_risk']:.1f}%"
-        lb_abs = abs(d["lowest_balance"])
-        lb_str = fmt_inr(lb_abs)
+    base = _result_field(branch_results.get("baseline"), "metrics", {}) or {}
+    if base:
         lines.append(
-            f"  {fork_labels[fid]}: survival={survival_str}, "
-            f"cash-out risk={risk_str}, "
-            f"min balance={lb_str}"
+            f"Without this decision your lowest balance would be {money(float(base.get('lowest_balance', 0.0)))}"
+            f" (survival score {pct(base.get('survival_score_pct', 0.0))})."
+        )
+        lines.append("")
+
+    if not rows:
+        lines.append("None of the options could be evaluated.")
+        return "\n".join(lines)
+
+    lines.append("Options compared:")
+    for fid, m in rows:
+        title = fork_metadata(kind, fid)[0]
+        below = int(m.get("months_below_floor", 0))
+        allowed_months.add(below)
+        parts = [
+            f"survival {pct(m.get('survival_score_pct', 0.0))}",
+            f"cash-out risk {pct(m.get('cash_out_risk_pct', 0.0))}",
+            f"lowest balance {money(float(m.get('lowest_balance', 0.0)))}",
+        ]
+        if floor > 0:
+            parts.append(f"{below} month(s) below the floor" if below else "never below the floor")
+        pm = _result_field(branch_results[fid], "purchase_month", 0) or 0
+        if fid in ("delay", "upfront", "trim", "phased") and int(pm) > 0:
+            allowed_months.add(int(pm) + 1)
+            parts.append(("starts" if fid == "delay" else "first payment") + f" in month {int(pm) + 1}")
+        if float(m.get("total_financing_interest", 0.0) or 0.0) > 0:
+            parts.append(f"interest {money(float(m['total_financing_interest']))}")
+        if float(m.get("total_trims_saved", 0.0) or 0.0) > 0:
+            parts.append(f"spending cuts {money(float(m['total_trims_saved']))}")
+        lines.append(f"  - {title}: " + ", ".join(parts))
+
+    def rank(item: Tuple[str, Dict[str, Any]]) -> Tuple:
+        _, m = item
+        return (
+            -int(m.get("months_below_floor", 0)),
+            float(m.get("survival_score_pct", 0.0)),
+            -float(m.get("total_financing_interest", 0.0) or 0.0),
+            -float(m.get("total_trims_saved", 0.0) or 0.0),
+            float(m.get("lowest_balance", 0.0)),
         )
 
-    # Recommendation: highest survival_score_pct
-    best_fid = max(fork_data, key=lambda k: fork_data[k]["survival"])
-    best = fork_data[best_fid]
-    survival_str = f"{best['survival']:.1f}%"
-    risk_str = f"{best['cash_out_risk']:.1f}%"
-    lb_str = fmt_inr(abs(best["lowest_balance"]))
-
-    lines += [
-        "",
-        f"Recommendation: {fork_labels[best_fid]} achieves the highest survival "
-        f"score ({survival_str}) with a cash-out risk of {risk_str} "
-        f"and a minimum balance of {lb_str}.",
-    ]
-
+    best_id, best = max(rows, key=rank)
+    best_title = fork_metadata(kind, best_id)[0]
+    lines.append("")
+    if floor > 0 and all(int(m.get("months_below_floor", 0)) > 0 for _, m in rows):
+        lines.append(
+            f"No option keeps you above the {money(floor)} floor in every month. {best_title} comes closest, "
+            f"with a lowest balance of {money(float(best.get('lowest_balance', 0.0)))}."
+        )
+    elif float(best.get("lowest_balance", 0.0)) < 0:
+        lines.append(
+            f"Every option runs out of cash at some point. {best_title} does best, with a lowest balance of "
+            f"{money(float(best.get('lowest_balance', 0.0)))}."
+        )
+    else:
+        lines.append(
+            f"Recommendation: {best_title}. It has the highest survival score ({pct(best.get('survival_score_pct', 0.0))})"
+            f" with a cash-out risk of {pct(best.get('cash_out_risk_pct', 0.0))} and a lowest balance of "
+            f"{money(float(best.get('lowest_balance', 0.0)))}."
+        )
     return "\n".join(lines)
 
 
@@ -592,7 +590,7 @@ def _build_template_explanation(
 # ===========================================================================
 
 _LLM_EXPLAINER_SYSTEM = """You are a financial decision explainer for FutureFork.
-Explain the 4 competing financing strategies clearly and factually.
+Explain the competing options for the user's decision clearly and factually, and recommend one.
 IMPORTANT: Use ONLY the numeric values provided in the data below. Do not invent or approximate numbers.
 Write in professional plain English. Keep it under 400 words."""
 
@@ -641,6 +639,7 @@ def _llm_explain(
 
         prompt = (
             f"Decision: {getattr(decision, 'raw_prompt', '')}\n"
+            f"Understood as: {getattr(decision, 'understood', '')}\n"
             f"Item: {getattr(decision, 'item_label', '')}, "
             f"Cost: {getattr(decision, 'total_cost', 0.0)}, "
             f"Floor: {getattr(decision, 'emergency_floor', 0.0)}\n"

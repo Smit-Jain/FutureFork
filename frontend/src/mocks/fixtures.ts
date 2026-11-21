@@ -60,6 +60,7 @@ export const MOCK_INSPECT_RESPONSE: InspectResponse = {
     category_col: 'Category',
     description_col: 'Narration',
     type_col: null,
+    balance_col: null,
     date_format: null,
     starting_balance: 0,
   },
@@ -73,6 +74,8 @@ export const MOCK_INSPECT_RESPONSE: InspectResponse = {
     { Date: '04/04/2024', Narration: 'Electricity Bill', Category: 'Utilities', Debit: '₹ 3,800.00', Credit: '', Balance: '₹ 2,56,363.28' },
     { Date: '05/04/2024', Narration: 'SIP Investment', Category: 'Investments', Debit: '₹ 25,000.00', Credit: '', Balance: '₹ 2,31,363.28' },
   ],
+  row_count: 5,
+  warnings: [],
   ttl_seconds: 900,
 };
 
@@ -121,7 +124,13 @@ function mockResult(decisionId: string, b: MockBranch): FinancialScenarioResult 
     type: c.type,
     values: MONTHS.map((_, i) => Math.round(c.base * (1 + 0.08 * Math.sin(i + c.base)) * (c.type === 'flexible' ? 1 - b.trim : 1))),
   }));
-  const cashFlow: CashFlowMatrixData = { months: MONTHS, inflows, purchase_cash_out: b.purchase, categories };
+  const cashFlow: CashFlowMatrixData = {
+    months: MONTHS,
+    projected: MONTHS.map(() => false),
+    inflows,
+    purchase_cash_out: b.purchase,
+    categories,
+  };
 
   let balance = 150000;
   const balances = MONTHS.map((_, i) => {
@@ -157,6 +166,7 @@ function mockResult(decisionId: string, b: MockBranch): FinancialScenarioResult 
       total_purchase_cost: b.branch === 'baseline' ? 0 : COST,
       total_financing_interest: b.interest,
       total_trims_saved: trimsSaved,
+      income_change_total: 0,
     },
     simulation: {
       n_runs: 300,
@@ -193,6 +203,8 @@ export function buildMockComparison(decisionId: string, text: string, datasetId:
       text,
       dataset_id: datasetId,
       dataset_type: 'personal',
+      decision_kind: 'one_time',
+      understood: 'Mock mode: a one-time cost of ₹1,20,000, keeping at least ₹30,000 in the bank.',
       change: { type: 'emi', params: { total_cost: COST, emergency_floor: FLOOR } },
       status: 'ok',
       message: null,
