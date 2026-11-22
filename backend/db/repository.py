@@ -83,6 +83,17 @@ def build_dataset_record(
 
 
 def init_db():
+    from sqlalchemy import inspect, text
+
+    with engine.connect() as conn:
+        inspector = inspect(conn)
+        if "results" in inspector.get_table_names():
+            columns = {col["name"] for col in inspector.get_columns("results")}
+            if "decision_id" not in columns or "payload" not in columns:
+                logger.info("Migrating legacy results table to modern schema...")
+                conn.execute(text("DROP TABLE results"))
+                conn.commit()
+
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
