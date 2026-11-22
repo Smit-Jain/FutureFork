@@ -545,3 +545,29 @@ async def test_unreadable_upload_is_rejected_clearly(db_session):
         await routes.inspect_dataset(file=UploadFile(filename="old.xls", file=io.BytesIO(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1x")),
                                      db=db_session, user=_user(db_session))
     assert "UNREADABLE_FILE" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_usd_millions_upload_reports_units_and_converts_on_commit(db_session):
+    """Inspect flags USD millions; commit with ₹88/USD stores rupees."""
+    from fastapi import UploadFile
+
+    csv = (
+        "Date,Description,Amount (USD mn),Type\n"
+        "2024-04-05,Customer payments,0.30,inflow\n"
+        "2024-04-20,Payroll,0.12,outflow\n"
+    ).encode()
+    user = _user(db_session)
+    res = await routes.inspect_dataset(file=UploadFile(filename="pnl_usd.csv", file=io.BytesIO(csv)), db=db_session, user=user)
+    units = res["units"]
+    assert units["currency"] == "USD" and units["scale"] == 1e6 and units["scale_label"] == "million"
+    assert units["suggested_fx_rate"] == 88.0
+
+    req = routes.CommitRequest(
+        upload_id=res["upload_id"], confirmed_mapping=res["proposed_mapping"], starting_balance=5_000_000, fx_rate=88.0
+    )
+    out = routes.commit_dataset(req, db=db_session, user=user)
+    ds = Repository(db_session).get_dataset(out["dataset_id"])
+    inst = ds["payload"]["instance"]
+    assert inst["inflows"][0] == pytest.approx(26_400_000)  # 0.30 × 10^6 × 88
+    assert any("converted at ₹88.00 per USD" in w for w in out["warnings"])

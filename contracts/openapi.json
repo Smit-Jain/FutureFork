@@ -1260,6 +1260,19 @@
             ],
             "title": "Monthly Income",
             "description": "Monthly income (\u20b9). Use when the file has no income rows, e.g. an expenses-only export."
+          },
+          "fx_rate": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fx Rate",
+            "description": "Rupees per unit of the file's currency (e.g. 88 for USD). Converts the amounts to \u20b9."
           }
         },
         "type": "object",

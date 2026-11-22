@@ -31,8 +31,10 @@ if str(ROOT_DIR) not in sys.path:
 
 from data.normalize import (
     UnreadableFileError,
+    cell_suffix_share,
     detect_columns,
     detect_currency,
+    detect_scale,
     flag_direction,
     load_table,
     parse_amount_series,
@@ -315,14 +317,14 @@ class FinancialIngestor:
         zeros = pd.Series(0.0, index=df.index)
 
         if m.debit_col in df and m.credit_col in df:
-            out, _ = parse_amount_series(df[m.debit_col])
-            inn, _ = parse_amount_series(df[m.credit_col])
+            out, _ = parse_amount_series(df[m.debit_col], detect_scale(m.debit_col)[0])
+            inn, _ = parse_amount_series(df[m.credit_col], detect_scale(m.credit_col)[0])
             return inn.abs().fillna(0.0), out.abs().fillna(0.0), notes
 
         amount_col = m.amount_col if m.amount_col in df else (m.debit_col if m.debit_col in df else m.credit_col)
         if amount_col not in df:
             raise ValueError("No amount, debit or credit column could be found in the file.")
-        vals, drcr = parse_amount_series(df[amount_col])
+        vals, drcr = parse_amount_series(df[amount_col], detect_scale(amount_col)[0])
         vals = vals.fillna(0.0)
 
         if m.debit_col in df and amount_col == m.debit_col:
@@ -364,8 +366,14 @@ class FinancialIngestor:
         name: str = "Financial Dataset",
         starting_balance: Optional[float] = None,
         monthly_income: Optional[float] = None,
+        fx_rate: Optional[float] = None,
     ) -> FinancialProblemInstance:
-        """Compile a financial export into a 12-month FinancialProblemInstance."""
+        """Compile a financial export into a 12-month FinancialProblemInstance.
+
+        Amounts are scaled by any unit in their header or cells (USD mn, lakhs, 1.2M, ...).
+        If they are in a foreign currency, `fx_rate` (rupees per unit) converts them to ₹;
+        `starting_balance` and `monthly_income` are always rupees.
+        """
         try:
             table = load_table(cls._to_bytes(csv_source))
         except UnreadableFileError as exc:
@@ -406,6 +414,29 @@ class FinancialIngestor:
         # --- Money in / out --------------------------------------------------
         inflow, outflow, notes = cls._signed_flows(df, col_map)
         warnings_ += notes
+
+        money_cols = [c for c in (col_map.amount_col, col_map.debit_col, col_map.credit_col) if c and c in df]
+        for c in dict.fromkeys(money_cols):
+            mult, unit = detect_scale(c)
+            if unit:
+                warnings_.append(f"Column '{c}' is in {unit}s, so its amounts were multiplied by {mult:,.0f}.")
+        if money_cols and cell_suffix_share(df[money_cols].stack()) > 0:
+            warnings_.append("Amounts written with units (like 1.2M or 3 lakh) were expanded to full numbers.")
+
+        currency = detect_currency(df[money_cols].stack() if money_cols else pd.Series(dtype=str), list(table.df.columns))
+        fx = float(fx_rate) if fx_rate else None
+        if currency and currency != "INR":
+            if fx and fx > 0:
+                inflow, outflow = inflow * fx, outflow * fx
+                warnings_.append(f"Amounts were in {currency} and were converted at ₹{fx:,.2f} per {currency}.")
+            else:
+                fx = None
+                warnings_.append(
+                    f"Amounts look like {currency}; they are shown with ₹ but the numbers are used as-is. "
+                    "Re-upload with an exchange rate to convert them."
+                )
+        else:
+            fx = None
         df["_in"], df["_out"] = inflow.values, outflow.values
 
         # Chronological order (bank exports are often newest-first)
@@ -418,7 +449,9 @@ class FinancialIngestor:
         if starting_balance is not None:
             opening = float(starting_balance)
         elif col_map.balance_col and col_map.balance_col in df:
-            bal, _ = parse_amount_series(df[col_map.balance_col])
+            bal, _ = parse_amount_series(df[col_map.balance_col], detect_scale(col_map.balance_col)[0])
+            if fx:
+                bal = bal * fx
             idx = bal.first_valid_index()
             if idx is not None:
                 opening = float(bal[idx] - (df.at[idx, "_in"] - df.at[idx, "_out"]))
@@ -502,12 +535,6 @@ class FinancialIngestor:
         if outflow_matrix.sum() <= 0:
             warnings_.append("No spending found in the file.")
 
-        currency = detect_currency(
-            df[[c for c in (col_map.amount_col, col_map.debit_col, col_map.credit_col) if c and c in df]].stack(),
-            list(table.df.columns),
-        )
-        if currency and currency != "INR":
-            warnings_.append(f"Amounts look like {currency}; they are shown with ₹ but the numbers are used as-is.")
 
         # --- Tags and statistics from observed months only -------------------
         category_types: Dict[str, str] = {}
@@ -562,7 +589,9 @@ class FinancialIngestor:
             "date_range": [months[0], months[-1]],
             "observed_months": observed,
             "projected_months": projected,
-            "currency": currency or "INR",
+            "currency": "INR" if fx else (currency or "INR"),
+            "source_currency": currency or "INR",
+            "fx_rate": fx,
             "detected_mapping": col_map.to_dict(),
             "warnings": warnings_,
         }
