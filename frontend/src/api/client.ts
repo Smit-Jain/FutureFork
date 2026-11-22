@@ -13,6 +13,11 @@ import {
   Scenario,
   StressRequest,
   StressResponse,
+  TaxInputs,
+  TaxProfile,
+  TaxProfileList,
+  TaxReport,
+  TaxRulesResponse,
   User,
 } from '../contracts/types';
 import { buildMockComparison, MOCK_INSPECT_RESPONSE, SAMPLE_DATASETS } from '../mocks/fixtures';
@@ -71,6 +76,8 @@ const json = (body: unknown): RequestInit => ({
 
 // Mock-mode state
 const mockDecisions: Record<string, { text: string; datasetId: string; startedAt: number }> = {};
+
+const TAX_NEEDS_BACKEND = 'The ITR helper needs the backend (set VITE_USE_MOCKS=false): tax figures only come from the tax engine.';
 
 const MOCK_USER: User = { id: 'mock', email: 'demo@futurefork.local', name: 'Mock User', picture: null };
 
@@ -254,5 +261,44 @@ export const api = {
       throw new Error('Custom branches need the backend (set VITE_USE_MOCKS=false).');
     }
     return request(`/scenarios/${parentScenarioId}/branch`, json({ name, change }));
+  },
+
+  // ─── ITR helper (every amount from engine/tax; no mock numbers) ─────────
+  async taxRules(): Promise<TaxRulesResponse> {
+    if (USE_MOCKS) throw new Error(TAX_NEEDS_BACKEND);
+    return request('/tax/rules');
+  },
+
+  async taxCompute(inputs: Partial<TaxInputs>, signal?: AbortSignal): Promise<TaxReport> {
+    if (USE_MOCKS) throw new Error(TAX_NEEDS_BACKEND);
+    return request('/tax/compute', { ...json(inputs), signal });
+  },
+
+  async taxProfiles(): Promise<TaxProfileList> {
+    if (USE_MOCKS) return { items: [] };
+    return request('/tax/profiles');
+  },
+
+  async taxProfile(id: string): Promise<TaxProfile> {
+    if (USE_MOCKS) throw new Error(TAX_NEEDS_BACKEND);
+    return request(`/tax/profiles/${id}`);
+  },
+
+  async saveTaxProfile(inputs: Partial<TaxInputs>, id?: string | null, label?: string): Promise<TaxProfile> {
+    if (USE_MOCKS) throw new Error(TAX_NEEDS_BACKEND);
+    const body = { inputs, label: label || null };
+    return id ? request(`/tax/profiles/${id}`, { ...json(body), method: 'PUT' }) : request('/tax/profiles', json(body));
+  },
+
+  async deleteTaxProfile(id: string): Promise<void> {
+    if (USE_MOCKS) return;
+    return request(`/tax/profiles/${id}`, { method: 'DELETE' });
+  },
+
+  async exportTaxProfile(id: string): Promise<Blob> {
+    if (USE_MOCKS) throw new Error(TAX_NEEDS_BACKEND);
+    const res = await fetch(`${API_BASE_URL}/tax/profiles/${id}/export`, { credentials: 'include', headers: { 'X-FutureFork': '1' } });
+    if (!res.ok) throw new ApiError('Export failed', res.status);
+    return res.blob();
   },
 };

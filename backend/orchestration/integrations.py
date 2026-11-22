@@ -383,3 +383,19 @@ __all__ = [
     "scenario_id_for",
     "to_api_result",
 ]
+
+
+# ---------------------------------------------------------------------------
+# ITR helper: tax engine + guarded explanation
+# ---------------------------------------------------------------------------
+
+def call_tax_report(inputs: Dict[str, Any], as_of: Optional[Any] = None, explain: bool = True) -> Dict[str, Any]:
+    """Run the tax engine (every rupee) and, optionally, the guarded explainer (words only)."""
+    from datetime import date as _date
+
+    from ai.agents.tax_explainer import explain_tax_report
+    from engine.tax import build_tax_report
+
+    report = build_tax_report(inputs, as_of=as_of or _date.today())
+    report["explanation"] = explain_tax_report(report) if explain else None
+    return report

@@ -34,10 +34,10 @@ function exportPlan(financialResults: FinancialScenarioResult[]) {
   const rows = [
     ['FutureFork: winning plan'],
     ['Fork', FORK_LABELS[best.branch_type]],
-    ['Survival score', `${best.metrics.survival_score_pct}%`],
-    ['Cash-out risk', `${best.metrics.cash_out_risk_pct}%`],
-    ['Runway', `${best.metrics.runway_months} months`],
-    ['P10 worst balance', best.metrics.p10_worst_balance],
+    ['Stays safe (% of 300 scenarios)', `${Math.round((100 - best.metrics.floor_breach_risk_pct) * 10) / 10}%`],
+    ['Room above cushion', best.metrics.lowest_balance - best.metrics.emergency_floor],
+    ['Bad-case low', best.metrics.p10_worst_balance],
+    ['Extra interest', best.metrics.total_financing_interest],
     [],
     ['Month', 'Money in', 'Decision cash-out', 'Closing balance', 'P10 balance', 'P90 balance'],
     ...months.map((m, i) => [

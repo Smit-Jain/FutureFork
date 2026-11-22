@@ -16,7 +16,7 @@ import {
 } from 'recharts';
 import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import { FinancialScenarioResult } from '../../contracts/types';
-import { BAD, FORK_COLORS, FORK_LABELS, chartTheme, fmtRs, riskStatus, riskTone, scoreTone } from '../../theme/forks';
+import { BAD, FORK_COLORS, FORK_LABELS, chartTheme, fmtRs, headroom, riskStatus, scoreTone, staysSafePct } from '../../theme/forks';
 
 interface OverviewProps {
   financialResults: FinancialScenarioResult[];
@@ -27,21 +27,19 @@ interface OverviewProps {
   onSelect: (id: string) => void;
 }
 
-type SortKey = 'fork' | 'survival' | 'cashout' | 'floor' | 'runway' | 'p10';
+type SortKey = 'fork' | 'safe' | 'room' | 'p10' | 'interest';
 const COLUMNS: { key: SortKey; label: string }[] = [
-  { key: 'fork', label: 'Fork' },
-  { key: 'survival', label: 'Survival' },
-  { key: 'cashout', label: 'Cash-out risk' },
-  { key: 'floor', label: 'Below floor' },
-  { key: 'runway', label: 'Runway' },
-  { key: 'p10', label: 'P10 low' },
+  { key: 'fork', label: 'Option' },
+  { key: 'safe', label: 'Stays safe' },
+  { key: 'room', label: 'Room above cushion' },
+  { key: 'p10', label: 'Bad-case low' },
+  { key: 'interest', label: 'Extra interest' },
 ];
 const sortValue = (r: FinancialScenarioResult, k: SortKey): number | string =>
   k === 'fork' ? FORK_LABELS[r.branch_type]
-  : k === 'survival' ? r.metrics.survival_score_pct
-  : k === 'cashout' ? r.metrics.cash_out_risk_pct
-  : k === 'floor' ? r.metrics.floor_breach_risk_pct
-  : k === 'runway' ? r.metrics.runway_months
+  : k === 'safe' ? staysSafePct(r.metrics)
+  : k === 'room' ? headroom(r.metrics)
+  : k === 'interest' ? r.metrics.total_financing_interest
   : r.metrics.p10_worst_balance;
 
 const MicroBar: React.FC<{ pct: number; color: string }> = ({ pct, color }) => (
@@ -85,7 +83,8 @@ export const Overview: React.FC<OverviewProps> = ({ financialResults, focusId, s
 
   const radarData = useMemo(() => {
     const maxP10 = Math.max(1, ...financialResults.map((r) => r.metrics.p10_worst_balance));
-    const maxRunway = Math.max(1, ...financialResults.map((r) => r.metrics.runway_months));
+    const maxRoom = Math.max(1, ...financialResults.map((r) => headroom(r.metrics)));
+    const maxInterest = Math.max(1, ...financialResults.map((r) => r.metrics.total_financing_interest));
     const axis = (subject: string, f: (r: FinancialScenarioResult) => number) => ({
       subject,
       ...financialResults.reduce((acc, r) => {
@@ -94,11 +93,10 @@ export const Overview: React.FC<OverviewProps> = ({ financialResults, focusId, s
       }, {} as Record<string, number>),
     });
     return [
-      axis('Survival', (r) => r.metrics.survival_score_pct),
-      axis('Cash safety', (r) => 100 - r.metrics.cash_out_risk_pct),
-      axis('Floor safety', (r) => 100 - r.metrics.floor_breach_risk_pct),
-      axis('Runway', (r) => (r.metrics.runway_months / maxRunway) * 100),
-      axis('P10 buffer', (r) => (r.metrics.p10_worst_balance / maxP10) * 100),
+      axis('Stays safe', (r) => staysSafePct(r.metrics)),
+      axis('Room above cushion', (r) => (headroom(r.metrics) / maxRoom) * 100),
+      axis('Bad-case buffer', (r) => (r.metrics.p10_worst_balance / maxP10) * 100),
+      axis('Low cost', (r) => 100 - (r.metrics.total_financing_interest / maxInterest) * 100),
     ];
   }, [financialResults]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -125,7 +123,8 @@ export const Overview: React.FC<OverviewProps> = ({ financialResults, focusId, s
           </thead>
           <tbody>
             {rows.map((r) => {
-              const sc = r.metrics.survival_score_pct;
+              const sc = staysSafePct(r.metrics);
+              const room = headroom(r.metrics);
               const st = riskStatus(sc);
               const isFocus = r.scenario_id === focusId;
               const isSel = r.scenario_id === selectedId;
@@ -148,15 +147,13 @@ export const Overview: React.FC<OverviewProps> = ({ financialResults, focusId, s
                     {sc}%
                     <MicroBar pct={sc} color={scoreTone(sc)} />
                   </td>
-                  <td className="py-3 pr-4 font-mono tabular-nums" style={{ color: riskTone(r.metrics.cash_out_risk_pct) }}>
-                    {r.metrics.cash_out_risk_pct}%
-                    <MicroBar pct={r.metrics.cash_out_risk_pct} color={riskTone(r.metrics.cash_out_risk_pct)} />
+                  <td className="py-3 pr-4 font-mono tabular-nums" style={{ color: room < 0 ? BAD : undefined }}>
+                    {room < 0 ? `−${fmtRs(-room)}` : fmtRs(room)}
                   </td>
-                  <td className="py-3 pr-4 font-mono tabular-nums">{r.metrics.floor_breach_risk_pct}%</td>
-                  <td className="py-3 pr-4 font-mono tabular-nums">{r.metrics.runway_months}mo</td>
-                  <td className="py-3 pr-4 font-mono tabular-nums" style={{ color: r.metrics.p10_worst_balance < 0 ? BAD : undefined }}>
+                  <td className="py-3 pr-4 font-mono tabular-nums" style={{ color: r.metrics.p10_worst_balance < r.metrics.emergency_floor ? BAD : undefined }}>
                     {fmtRs(r.metrics.p10_worst_balance)}
                   </td>
+                  <td className="py-3 pr-4 font-mono tabular-nums">{r.metrics.total_financing_interest > 0 ? fmtRs(r.metrics.total_financing_interest) : '₹0'}</td>
                   <td className="py-3">
                     <span className="inline-flex items-center h-6 px-2 font-mono text-[10px] uppercase tracking-[0.06em] text-paper" style={{ background: st.color }}>
                       {st.label}

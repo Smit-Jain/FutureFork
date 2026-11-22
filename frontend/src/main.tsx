@@ -14,6 +14,7 @@ import { RequireAuth } from './auth/RequireAuth';
 const Landing = lazy(() => import('./pages/Landing'));
 const Workspace = lazy(() => import('./pages/Workspace'));
 const SignIn = lazy(() => import('./pages/SignIn'));
+const TaxWorkspace = lazy(() => import('./pages/TaxWorkspace'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -44,6 +45,14 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
                 element={
                   <RequireAuth>
                     <Workspace />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/app/tax"
+                element={
+                  <RequireAuth>
+                    <TaxWorkspace />
                   </RequireAuth>
                 }
               />

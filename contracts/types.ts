@@ -192,12 +192,27 @@ export interface Explanation {
   violations: Record<string, unknown>[];
 }
 
+export interface AffordabilityAnswer {
+  safe_now: number;
+  max_safe_amount: number;
+  best_month: string;
+  best_month_index: number;
+  cost: number;
+  floor: number;
+  fits: boolean;
+  earliest_safe_month: string | null;
+  shortfall: number;
+  monthly_cut_to_close_gap: number;
+  headroom_by_month: number[];
+}
+
 export interface ComparisonResponse {
   decision_id: string;
   decision_spec: DecisionSpec;
   scenarios: Scenario[];
   results: Record<string, FinancialScenarioResult>;
   explanation: Explanation;
+  answer?: AffordabilityAnswer | null;
 }
 
 // ─── Crisis Playground (engine-backed stress test) ──────────────────────────
@@ -260,6 +275,231 @@ export interface HistoryItem {
 
 export interface HistoryResponse {
   items: HistoryItem[];
+}
+
+// ─── ITR helper (engine/tax) ──────────────────────────────────────────────
+
+export type TaxpayerType = 'salaried' | 'freelancer' | 'business';
+export type AgeBand = 'below_60' | '60_to_80' | 'above_80';
+export type Regime = 'new' | 'old';
+
+export interface TaxInputs {
+  fy: string;
+  taxpayer_type: TaxpayerType;
+  age_band: AgeBand;
+  resident: boolean;
+  basic_da: number;
+  hra_received: number;
+  other_salary: number;
+  employer_nps: number;
+  professional_tax: number;
+  rent_paid: number;
+  metro_city: boolean;
+  gross_receipts: number;
+  digital_receipts: number;
+  declared_profit: number;
+  home_loan_interest: number;
+  let_out_rent: number;
+  let_out_municipal_tax: number;
+  let_out_loan_interest: number;
+  savings_interest: number;
+  deposit_interest: number;
+  dividends: number;
+  other_income: number;
+  stcg_111a: number;
+  ltcg_112a: number;
+  d_80c: number;
+  d_80ccd1b: number;
+  d_80d_self: number;
+  d_80d_parents: number;
+  parents_senior: boolean;
+  d_80e: number;
+  tds: number;
+  tcs: number;
+  advance_tax: number;
+}
+
+export interface TaxLine {
+  key: string;
+  label: string;
+  amount: number;
+  kind: string;
+  section: string;
+}
+
+export interface TaxPresumptive {
+  section: string | null;
+  income: number;
+  within_limit: boolean;
+  limit: number;
+}
+
+export interface TaxBreakdown {
+  regime: Regime;
+  gross_total_income: number;
+  total_deductions: number;
+  taxable_income: number;
+  slab_tax: number;
+  special_rate_tax: number;
+  rebate: number;
+  surcharge: number;
+  cess: number;
+  total_tax: number;
+  taxes_paid: number;
+  payable: number;
+  refund: number;
+  effective_rate_pct: number;
+  heads: Record<string, number>;
+  exemptions: Record<string, number>;
+  deductions: Record<string, number>;
+  presumptive: TaxPresumptive;
+  lines: TaxLine[];
+  notes: string[];
+}
+
+export interface FilingWindow {
+  status: 'planning' | 'on_time' | 'belated' | 'closed';
+  section: string | null;
+  due_date: string;
+  belated_until: string;
+  old_regime_allowed: boolean;
+  message: string;
+}
+
+export interface ItrFormChoice {
+  form: 'ITR-1' | 'ITR-2' | 'ITR-3' | 'ITR-4';
+  name: string;
+  supported: boolean;
+  reasons: string[];
+}
+
+export interface TaxVerdict {
+  headline: string;
+  subline: string;
+  result: string;
+  outcome: 'refund' | 'payable' | 'settled';
+  outcome_amount: number;
+  regime: Regime;
+  saving_vs_other: number;
+}
+
+export interface TaxMove {
+  key: string;
+  title: string;
+  detail: string;
+  extra_outlay: number;
+  tax_before: number;
+  tax_after: number;
+  saving: number;
+  regime_after: Regime;
+  benefit: boolean;
+  locks_money: boolean;
+}
+
+export interface TaxSavings {
+  fy: string;
+  baseline_tax: number;
+  baseline_regime: Regime;
+  moves: TaxMove[];
+}
+
+export interface ChecklistField {
+  label: string;
+  value: number;
+  where: string;
+}
+
+export interface ChecklistStep {
+  n: number;
+  title: string;
+  detail: string;
+  fields: ChecklistField[];
+}
+
+export interface FilingChecklist {
+  form: string;
+  regime: Regime;
+  steps: ChecklistStep[];
+  documents: string[];
+}
+
+export interface TaxExplanation {
+  text: string;
+  source: 'llm' | 'template';
+  guard_passed: boolean;
+}
+
+export interface TaxReport {
+  fy: string;
+  ay: string;
+  rules_status: 'filing' | 'planning';
+  as_of: string;
+  inputs: TaxInputs;
+  new: TaxBreakdown;
+  old: TaxBreakdown;
+  cheaper: Regime;
+  recommended: Regime;
+  regime_saving: number;
+  window: FilingWindow;
+  late_fee: number;
+  form: ItrFormChoice;
+  verdict: TaxVerdict;
+  savings: TaxSavings;
+  checklist: FilingChecklist;
+  explanation: TaxExplanation | null;
+}
+
+export interface TaxProfile {
+  id: string;
+  label: string;
+  fy: string;
+  inputs: TaxInputs;
+  report: TaxReport | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface TaxProfileSummary {
+  id: string;
+  label: string;
+  fy: string;
+  taxpayer_type: TaxpayerType;
+  headline: string | null;
+  form: string | null;
+  updated_at: string | null;
+}
+
+export interface TaxProfileList {
+  items: TaxProfileSummary[];
+}
+
+export interface TaxYearInfo {
+  fy: string;
+  ay: string;
+  status: 'filing' | 'planning';
+  standard_deduction_new: number;
+  standard_deduction_old: number;
+  rebate_limit_new: number;
+  cap_80c: number;
+  cap_80ccd1b: number;
+  cap_80d_self: number;
+  cap_80d_self_senior: number;
+  cap_80d_parents: number;
+  cap_80d_parents_senior: number;
+  cap_24b: number;
+  ltcg_112a_exempt: number;
+  limit_44ada: number;
+  limit_44ada_digital: number;
+  limit_44ad: number;
+  limit_44ad_digital: number;
+  due_date_salaried: string;
+  due_date_business: string;
+  belated_until: string;
+}
+
+export interface TaxRulesResponse {
+  default_fy: string;
+  years: TaxYearInfo[];
 }
 
 export interface ApiError {

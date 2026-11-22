@@ -637,6 +637,32 @@ def test_mapper_regex_fallback_startup() -> None:
     assert result.confidence >= 0.7
 
 
+def test_tax_explanations_pass_guard() -> None:
+    """Tax explanations (template path) only quote engine numbers and name the right regime."""
+    from datetime import date
+
+    from ai.agents.tax_explainer import explain_tax_report
+    from engine.tax import build_tax_report
+
+    cases = [
+        ({"basic_da": 600_000, "other_salary": 700_000, "tds": 20_000}, date(2026, 7, 1), "new regime"),
+        ({"basic_da": 1_000_000, "hra_received": 500_000, "other_salary": 300_000, "rent_paid": 600_000,
+          "metro_city": True, "home_loan_interest": 200_000, "d_80c": 150_000, "d_80ccd1b": 50_000,
+          "d_80d_self": 25_000, "d_80d_parents": 50_000, "parents_senior": True}, date(2026, 7, 1), "old regime"),
+        ({"taxpayer_type": "freelancer", "gross_receipts": 4_000_000, "digital_receipts": 4_000_000},
+         date(2026, 11, 22), "ITR-4"),
+    ]
+    for inputs, as_of, expect in cases:
+        out = explain_tax_report(build_tax_report(inputs, as_of=as_of))
+        assert out["guard_passed"], out["text"]
+        assert expect in out["text"], (expect, out["text"])
+    # A made-up rupee figure is caught
+    report = build_tax_report(cases[0][0], as_of=cases[0][1])
+    from ai.agents.tax_explainer import allowed_facts
+    money, pcts = allowed_facts(report)
+    assert not run_numeric_guard("You save ₹37,123 by switching.", money, pcts, set()).passed
+
+
 # Collect all unit tests
 UNIT_TESTS = [
     ("test_indian_amount_parser", test_indian_amount_parser),
@@ -646,6 +672,7 @@ UNIT_TESTS = [
     ("test_mapper_regex_fallback_personal", test_mapper_regex_fallback_personal),
     ("test_mapper_regex_fallback_institute", test_mapper_regex_fallback_institute),
     ("test_mapper_regex_fallback_startup", test_mapper_regex_fallback_startup),
+    ("test_tax_explanations_pass_guard", test_tax_explanations_pass_guard),
 ]
 
 # ===========================================================================

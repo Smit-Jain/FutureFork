@@ -1,10 +1,10 @@
-import React, { useMemo, useRef } from 'react';
-import { AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react';
+import React, { useMemo, useRef, useState } from 'react';
+import { AlertTriangle, CheckCircle2, Loader2, SlidersHorizontal } from 'lucide-react';
 import { DatasetType, DecisionSpec } from '../contracts/types';
 import { DetectedChips } from '../decide/DetectedChips';
 import { LiquidityBasis, PreflightBar } from '../decide/PreflightBar';
-import { SimControls, StressMode } from '../decide/SimControls';
-import { DecisionTag, detect, withCadence, withFloor, withSpend } from '../decide/parseDecision';
+import { STRESS_PRESETS, SimControls, StressMode } from '../decide/SimControls';
+import { DecisionTag, detect, formatAmount, withCadence, withFloor, withSpend } from '../decide/parseDecision';
 
 export const EXAMPLE_PROMPTS: Record<DatasetType, string[]> = {
   personal: [
@@ -87,6 +87,7 @@ export const DecisionInput: React.FC<DecisionInputProps> = ({
     onRun(promptText.trim());
   };
 
+  const [showOptions, setShowOptions] = useState(false);
   const needsClarification = decisionSpec && decisionSpec.status !== 'ok';
   const understood = decisionSpec?.status === 'ok' ? decisionSpec.understood : null;
   const isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform);
@@ -113,7 +114,7 @@ export const DecisionInput: React.FC<DecisionInputProps> = ({
             rows={3}
             spellCheck={false}
             className="block w-full bg-transparent px-4 py-3 text-[16px] leading-relaxed resize-none placeholder:text-ink-dim focus:outline-none"
-            placeholder="e.g. Buy a ₹1.2L laptop on EMI without dropping below ₹30k emergency savings"
+            placeholder="e.g. Buy a ₹1.2L laptop on EMI without dropping below ₹30k savings (₹, lakh, crore or k all work)"
           />
         </div>
 
@@ -124,9 +125,9 @@ export const DecisionInput: React.FC<DecisionInputProps> = ({
           onCadence={(c) => setPromptText(withCadence(promptText, detected, c))}
         />
 
-        <div className="space-y-2">
-          <span className="label text-[10px]">Try a preset</span>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" aria-label="Example decisions">
+        <div className="flex items-start gap-3">
+          <span className="label text-[10px] pt-2 shrink-0">Try</span>
+          <div className="flex flex-wrap gap-2" aria-label="Example decisions">
             {presets.map(({ text, tag }) => {
               const active = promptText === text;
               return (
@@ -137,34 +138,28 @@ export const DecisionInput: React.FC<DecisionInputProps> = ({
                     setPromptText(text);
                     textRef.current?.focus();
                   }}
-                  className={`group text-left px-3 py-2 border flex items-start gap-2.5 transition-all duration-200
-                              ${active ? 'border-ink bg-ink text-paper' : 'border-ink-faint bg-paper-2 hover:border-ink hover:-translate-y-px hover:shadow-paper'}`}
+                  title={text}
+                  className={`max-w-full h-8 px-3 border rounded-full flex items-center gap-2 transition-all duration-200
+                              ${active ? 'border-ink bg-ink text-paper' : 'border-ink-faint bg-paper-2 hover:border-ink hover:-translate-y-px'}`}
                 >
-                  <span
-                    className="shrink-0 mt-0.5 font-mono text-[9.5px] tracking-[0.06em] px-1 border"
-                    style={{ color: active ? '#efece6' : TAG_COLOR[tag], borderColor: active ? '#efece6' : TAG_COLOR[tag] }}
-                  >
-                    {tag}
-                  </span>
-                  <span className="text-[13px] leading-snug">{text}</span>
+                  <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: active ? '#efece6' : TAG_COLOR[tag] }} aria-hidden="true" />
+                  <span className="text-[12.5px] truncate max-w-[19rem]">{text}</span>
                 </button>
               );
             })}
           </div>
         </div>
 
-        <SimControls
-          stressMode={stressMode}
-          onStressMode={onStressMode}
-          floor={detected.floor?.value ?? 0}
-          floorMax={floorMax}
-          onFloor={(v) => setPromptText(withFloor(promptText, detected, v))}
-        />
-
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <span className="label text-[10px]" aria-live="polite">
-            {isRunning ? statusMessage : 'Amounts: ₹, lakh (L), crore (Cr) or k'}
-          </span>
+        <div className="border-t border-ink-line pt-4 flex flex-wrap items-center justify-between gap-3">
+          <button
+            type="button"
+            onClick={() => setShowOptions((v) => !v)}
+            aria-expanded={showOptions}
+            className="label text-[10.5px] flex items-center gap-1.5 hover:text-ink"
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+            {showOptions ? 'Hide options' : `Options · keep ${formatAmount(detected.floor?.value ?? 0)} · ${STRESS_PRESETS[stressMode].label}`}
+          </button>
           <button
             type="submit"
             disabled={isRunning || !promptText.trim()}
@@ -185,6 +180,22 @@ export const DecisionInput: React.FC<DecisionInputProps> = ({
             </kbd>
           </button>
         </div>
+        {showOptions && (
+          <div className="animate-in">
+            <SimControls
+              stressMode={stressMode}
+              onStressMode={onStressMode}
+              floor={detected.floor?.value ?? 0}
+              floorMax={floorMax}
+              onFloor={(v) => setPromptText(withFloor(promptText, detected, v))}
+            />
+          </div>
+        )}
+        {isRunning && (
+          <p className="label text-[10px]" aria-live="polite">
+            {statusMessage}
+          </p>
+        )}
       </div>
 
       {/* ── Right: pre-flight + the engine's reading ── */}
@@ -205,12 +216,6 @@ export const DecisionInput: React.FC<DecisionInputProps> = ({
             <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-warn" />
             <span>{decisionSpec?.message || 'Please include an amount like ₹60L, ₹1.2 lakh or ₹30,000.'}</span>
           </div>
-        )}
-        {!understood && !needsClarification && (
-          <p className="text-[12px] text-ink-dim leading-relaxed">
-            The chips are a live preview from your text. After you run, the engine's own reading appears here, and every result
-            number comes from CP-SAT and the Monte Carlo simulation.
-          </p>
         )}
       </aside>
     </form>

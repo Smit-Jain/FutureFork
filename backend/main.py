@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse
 from backend import settings
 from backend.api.auth_routes import router as auth_router
 from backend.api.routes import router
+from backend.api.tax_routes import router as tax_router
 from backend.db.repository import init_db
 
 # Configure structured logging
@@ -77,6 +78,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 # Include API routes (auth endpoints are public; everything in `router` requires a session)
 app.include_router(auth_router)
 app.include_router(router)
+app.include_router(tax_router)
 
 if __name__ == "__main__":
     import uvicorn

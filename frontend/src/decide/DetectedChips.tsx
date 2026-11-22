@@ -125,7 +125,6 @@ export const DetectedChips: React.FC<DetectedChipsProps> = ({ detected: d, onSpe
       ) : (
         <Chip label="Reserve floor" value="+ add" onCommit={amountCommit(onFloor)} tone="dim" title="Add a minimum balance to protect" />
       )}
-      <Chip label="Type" value={d.tag} tone="dim" />
     </div>
   );
 };

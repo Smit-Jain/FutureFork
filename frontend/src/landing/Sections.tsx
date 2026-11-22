@@ -210,10 +210,10 @@ export const CasesSection = forwardRef<HTMLElement, SectionProps>(({ entered, re
 
       <div className={`ff-quote rv d2 ${out ? 'ff-swap-out' : ''}`} aria-live="polite">
         <p>“{c.question}</p>
-        <Link className="ff-try" to={appLink(c.dataset, c.prompt)}>
+        <Link className="ff-try" to={c.href ?? appLink(c.dataset, c.prompt)}>
           Try for yourself
           <br />
-          (Run this case)
+          ({c.cta ?? 'Run this case'})
         </Link>
       </div>
 

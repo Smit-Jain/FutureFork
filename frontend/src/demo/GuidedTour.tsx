@@ -17,14 +17,24 @@ export const DEMO_TOUR: TourStep[] = [
     body: 'The prompt is parsed into amounts, timing and a safety floor. Check the "Understood as" line to see exactly what FutureFork read.',
   },
   {
+    target: 'verdict',
+    title: 'The answer, first',
+    body: 'One sentence tells you the best option and how often it keeps you above your safety cushion across 300 what-if scenarios of your next 12 months (late salary, surprise bills, rising prices). Tap a "?" for what each number means.',
+  },
+  {
     target: 'tree',
-    title: 'One decision, several forks',
-    body: 'Each card is a different strategy, solved with OR-Tools CP-SAT and stress-tested with 300 Monte Carlo runs. Click a card to inspect it.',
+    title: 'Every option side by side',
+    body: 'Each card is a different way to do it, with the same three plain numbers. Click one to inspect it in the details below.',
+  },
+  {
+    target: 'explanation',
+    title: 'A recommendation you can check',
+    body: 'The explanation is written from the engine’s numbers, and the Numeric Guard verifies every figure in it.',
   },
   {
     target: 'overview',
     tab: 'overview',
-    title: 'Compare at a glance',
+    title: 'The details, when you want them',
     body: 'Sort the table, hover a fork to spotlight its balance curve, or switch to "Selected vs baseline" to isolate two lines.',
   },
   {
@@ -38,11 +48,6 @@ export const DEMO_TOUR: TourStep[] = [
     tab: 'cashflow',
     title: 'Every rupee, every month',
     body: 'The selected fork’s 12-month cash flow. "Diff vs baseline" lights up only the cells the strategy changes.',
-  },
-  {
-    target: 'explanation',
-    title: 'A recommendation you can check',
-    body: 'The explanation is written from the engine’s numbers, and the Numeric Guard verifies every figure in it.',
   },
 ];
 

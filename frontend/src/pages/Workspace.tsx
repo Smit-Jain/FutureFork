@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { AlertTriangle, ArrowLeft, Compass, History, LogOut, RotateCcw } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ChevronDown, Compass, History, LogOut, RotateCcw } from 'lucide-react';
 import { api, isMockMode } from '../api/client';
-import { DatasetType, DecisionSpec, Explanation, FinancialScenarioResult, Scenario } from '../contracts/types';
+import { AffordabilityAnswer, DatasetType, DecisionSpec, Explanation, FinancialScenarioResult, Scenario } from '../contracts/types';
 import { CompareTab, CompareWorkbench } from '../components/compare/CompareWorkbench';
 import { DecisionInput, EXAMPLE_PROMPTS } from '../components/DecisionInput';
 import { ExplanationPanel } from '../components/ExplanationPanel';
+import { VerdictHero } from '../components/VerdictHero';
 import { ScenarioTree } from '../components/ScenarioTree';
 import { UploadIngestor } from '../components/UploadIngestor';
 import { ToastContainer, ToastMessage } from '../components/ui/Toast';
@@ -15,6 +16,7 @@ import { DEMO_TOUR, GuidedTour } from '../demo/GuidedTour';
 import { LiquidityBasis } from '../decide/PreflightBar';
 import { StressMode } from '../decide/SimControls';
 import { LogoMark } from '../landing/Chrome';
+import { ModuleSwitch } from '../components/ModuleSwitch';
 import { SAMPLE_DATASETS } from '../mocks/fixtures';
 
 type Tab = 'upload' | 'fork';
@@ -50,7 +52,26 @@ const Section: React.FC<{ n: string; title: string; hint?: string; children: Rea
   </section>
 );
 
+const DETAILS_KEY = 'ff.detailsOpen';
+const readDetails = () => {
+  try {
+    return window.localStorage.getItem(DETAILS_KEY) === '1';
+  } catch {
+    return false;
+  }
+};
+
 const Workspace: React.FC = () => {
+  const [answer, setAnswer] = useState<AffordabilityAnswer | null>(null);
+  const [detailsOpen, setDetailsOpenState] = useState<boolean>(readDetails);
+  const setDetailsOpen = (v: boolean) => {
+    setDetailsOpenState(v);
+    try {
+      window.localStorage.setItem(DETAILS_KEY, v ? '1' : '0');
+    } catch {
+      /* storage unavailable: keep it for this visit only */
+    }
+  };
   const [searchParams, setSearchParams] = useSearchParams();
   const [tab, setTab] = useState<Tab>('upload');
   const [dataset, setDataset] = useState<ActiveDataset | null>(null);
@@ -129,6 +150,7 @@ const Workspace: React.FC = () => {
           setScenarios(comp.scenarios);
           setResults(comp.results);
           setExplanation(comp.explanation);
+          setAnswer(comp.answer ?? null);
           setSelectedId(comp.scenarios.find((s) => s.parent_id === null)?.id ?? null);
           setIsRunning(false);
           setRunProgress(100);
@@ -138,7 +160,7 @@ const Workspace: React.FC = () => {
           } else if (failed > 0) {
             addToast('info', `${failed} fork(s) could not be evaluated. See the scenario cards for details.`, 'Partially evaluated');
           } else {
-            addToast('success', 'All forks evaluated with OR-Tools CP-SAT and Monte Carlo simulation.', 'Evaluation complete');
+            setTimeout(() => document.querySelector('[data-tour="verdict"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 250);
           }
         }
       } catch (err) {
@@ -158,6 +180,7 @@ const Workspace: React.FC = () => {
     setScenarios([]);
     setResults({});
     setExplanation(null);
+    setAnswer(null);
     setSelectedId(null);
     setRunId(null);
     setRunProgress(0);
@@ -169,7 +192,6 @@ const Workspace: React.FC = () => {
     setPromptText(EXAMPLE_PROMPTS[type][0]);
     setTab('fork');
     window.scrollTo({ top: 0 });
-    if (!quiet) addToast('success', `Baseline (Node 0) ready for "${name}". Describe a decision to fork it.`, 'Dataset ready');
   };
 
   const handleRun = async (text: string, ds: ActiveDataset | null = dataset) => {
@@ -228,6 +250,7 @@ const Workspace: React.FC = () => {
       setScenarios(comp.scenarios);
       setResults(comp.results);
       setExplanation(Object.keys(comp.results).length ? comp.explanation : null);
+      setAnswer(comp.answer ?? null);
       setSelectedId(comp.scenarios.find((sc) => sc.parent_id === null)?.id ?? null);
       setRunId(null);
       setRunProgress(Object.keys(comp.results).length ? 100 : 0);
@@ -293,10 +316,13 @@ const Workspace: React.FC = () => {
       {/* ── Header ───────────────────────────────────────────────────────── */}
       <header className="sticky top-0 z-40 bg-paper/85 backdrop-blur-md border-b border-ink-line">
         <div className="max-w-[1320px] mx-auto px-4 sm:px-6 h-[52px] flex items-center justify-between gap-4">
-          <Link to="/" className="flex items-center gap-2.5 shrink-0" aria-label="FutureFork home">
-            <LogoMark />
-            <span className="text-[18px] font-medium tracking-[0.01em]">FUTUREFORK</span>
-          </Link>
+          <div className="flex items-center gap-4 shrink-0">
+            <Link to="/" className="flex items-center gap-2.5 shrink-0" aria-label="FutureFork home">
+              <LogoMark />
+              <span className="hidden xl:inline text-[18px] font-medium tracking-[0.01em]">FUTUREFORK</span>
+            </Link>
+            <ModuleSwitch />
+          </div>
 
           <nav className="hidden md:flex items-stretch h-full" aria-label="Steps">
             {[
@@ -442,8 +468,17 @@ const Workspace: React.FC = () => {
               runProgress={runProgress}
             />
 
+            {forkResults.length > 0 && (
+              <Section n="02" title="The answer" hint="Explained, then verified">
+                <div className="space-y-8">
+                  <VerdictHero results={forkResults} answer={answer} />
+                  <ExplanationPanel explanation={explanation} financialResults={forkResults} />
+                </div>
+              </Section>
+            )}
+
             {scenarios.length > 0 && (
-              <Section n="02" title="The forks" hint="Hover to spotlight · click to select">
+              <Section n="03" title="The options" hint="Click one to inspect it">
                 <ScenarioTree
                   scenarios={scenarios}
                   results={results}
@@ -456,25 +491,40 @@ const Workspace: React.FC = () => {
             )}
 
             {forkResults.length > 0 && (
-              <>
-                <Section n="03" title="Compare" hint="Every number from CP-SAT + Monte Carlo">
-                  <CompareWorkbench
-                    financialResults={forkResults}
-                    selectedId={selectedId}
-                    hoverId={hoverId}
-                    onHover={setHoverId}
-                    onSelect={setSelectedId}
-                    decisionId={decisionSpec?.id ?? null}
-                    stressMode={stressMode}
-                    tab={compareTab}
-                    onTab={setCompareTab}
-                  />
-                </Section>
-
-                <Section n="04" title="Verdict" hint="Explained, then verified">
-                  <ExplanationPanel explanation={explanation} financialResults={forkResults} />
-                </Section>
-              </>
+              <section className="space-y-5">
+                <button
+                  type="button"
+                  onClick={() => setDetailsOpen(!detailsOpen)}
+                  aria-expanded={detailsOpen}
+                  className="w-full flex items-center justify-between gap-3 border-y border-ink py-4 text-left group"
+                >
+                  <span className="flex items-baseline gap-4">
+                    <span className="font-mono text-xs text-ink-dim">04</span>
+                    <span className="text-2xl sm:text-3xl tracking-tight leading-none">
+                      {detailsOpen ? 'Hide the details' : 'Show the details'}
+                    </span>
+                  </span>
+                  <span className="label flex items-center gap-2 group-hover:text-ink">
+                    <span className="hidden md:inline">Charts · cash flow · crisis playground</span>
+                    <ChevronDown className={`w-4 h-4 transition-transform ${detailsOpen ? 'rotate-180' : ''}`} />
+                  </span>
+                </button>
+                {detailsOpen && (
+                  <div className="animate-in">
+                    <CompareWorkbench
+                      financialResults={forkResults}
+                      selectedId={selectedId}
+                      hoverId={hoverId}
+                      onHover={setHoverId}
+                      onSelect={setSelectedId}
+                      decisionId={decisionSpec?.id ?? null}
+                      stressMode={stressMode}
+                      tab={compareTab}
+                      onTab={setCompareTab}
+                    />
+                  </div>
+                )}
+              </section>
             )}
           </>
         )}
@@ -487,7 +537,12 @@ const Workspace: React.FC = () => {
         onOpenDecision={openDecision}
         currentDecisionId={decisionSpec?.id ?? null}
       />
-      {tourOpen && <GuidedTour steps={DEMO_TOUR} onClose={() => setTourOpen(false)} onStep={(st) => st.tab && setCompareTab(st.tab)} />}
+      {tourOpen && <GuidedTour steps={DEMO_TOUR} onClose={() => setTourOpen(false)} onStep={(st) => {
+            if (st.tab) {
+              setDetailsOpen(true);
+              setCompareTab(st.tab);
+            }
+          }} />}
 
       <footer className="border-t border-ink-line mt-8">
         <div className="max-w-[1320px] mx-auto px-4 sm:px-6 py-6 flex flex-col sm:flex-row items-center justify-between gap-2 label">

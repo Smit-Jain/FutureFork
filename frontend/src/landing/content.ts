@@ -60,9 +60,22 @@ export interface UseCase {
   question: string;
   /** Prompt sent to the engine when the visitor runs the case. */
   prompt: string;
+  /** Opens a different tool instead of the fork workspace. */
+  href?: string;
+  cta?: string;
 }
 
 export const CASES: UseCase[] = [
+  {
+    dataset: '',
+    persona: 'person',
+    name: 'ITR helper',
+    role: 'Salaried or freelancer · FY 2025-26',
+    question: 'Old regime or new, which ITR form, and what exactly do I type on the e-filing portal?',
+    prompt: '',
+    href: '/app/tax',
+    cta: 'Open the ITR helper',
+  },
   {
     dataset: 'sample_personal',
     persona: 'person',

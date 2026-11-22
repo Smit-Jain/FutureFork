@@ -7,21 +7,21 @@ export interface DeltaPill {
   color: string;
 }
 
-const signed = (v: number, fmt: (x: number) => string) => `${v > 0 ? '+' : v < 0 ? '−' : '±'}${fmt(Math.abs(v))}`;
 
 /**
  * Differences between a fork and the baseline, built only from engine-computed metrics
- * (survival, P10 low, financing interest, category trims). No new numbers are estimated.
+ * (share of safe scenarios, low point in a bad scenario, financing interest, category trims). Only non-zero changes are shown.
  */
 export function deltasVsBaseline(r: FinancialScenarioResult, base: FinancialScenarioResult | null, max = 4): DeltaPill[] {
   if (!base || r.branch_type === 'baseline') return [];
   const out: DeltaPill[] = [];
 
-  const ds = Math.round((r.metrics.survival_score_pct - base.metrics.survival_score_pct) * 10) / 10;
-  if (ds !== 0) out.push({ text: `${signed(ds, (x) => `${x}`)} pts survival`, color: ds > 0 ? GOOD : BAD });
+  // Safe scenarios: Monte Carlo runs that never breach the floor, recovered exactly from the engine's share
+  const safe = (x: FinancialScenarioResult) => Math.round((x.simulation.n_runs * (100 - x.metrics.floor_breach_risk_pct)) / 100);
+  const dy = safe(r) - safe(base);
+  const dpct = Math.round((Math.abs(dy) / r.simulation.n_runs) * 100);
+  if (dpct !== 0) out.push({ text: dy > 0 ? `${dpct}% safer` : `${dpct}% riskier`, color: dy > 0 ? GOOD : BAD });
 
-  const dp = r.metrics.p10_worst_balance - base.metrics.p10_worst_balance;
-  if (Math.abs(dp) >= 1) out.push({ text: `${signed(dp, fmtRs)} P10 low`, color: dp > 0 ? GOOD : BAD });
 
   if (r.metrics.total_financing_interest > 0) out.push({ text: `${fmtRs(r.metrics.total_financing_interest)} interest`, color: BAD });
 
@@ -31,7 +31,6 @@ export function deltasVsBaseline(r: FinancialScenarioResult, base: FinancialScen
     .slice(0, 2)
     .forEach(([cat, f]) => out.push({ text: `−${Math.round(f * 100)}% ${cat}`, color: '#141414' }));
 
-  if (out.length === 0) out.push({ text: 'Same risk as baseline', color: 'rgba(20,20,20,.5)' });
   return out.slice(0, max);
 }
 

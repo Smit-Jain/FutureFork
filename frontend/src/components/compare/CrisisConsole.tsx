@@ -159,8 +159,8 @@ export const CrisisConsole: React.FC<CrisisConsoleProps> = ({ financialResults, 
         <div className="space-y-2" aria-live="polite">
           {financialResults.map((r) => {
             const sr = stress?.results[r.scenario_id];
-            const base = r.metrics.survival_score_pct;
-            const s = sr?.survival_score_pct ?? base;
+            const base = Math.round((100 - r.metrics.floor_breach_risk_pct) * 10) / 10;
+            const s = sr ? Math.round((100 - sr.floor_breach_risk_pct) * 10) / 10 : base;
             const delta = Math.round((s - base) * 10) / 10;
             const st = cardStatus(s);
             const focused = focusId === r.scenario_id;
@@ -191,13 +191,12 @@ export const CrisisConsole: React.FC<CrisisConsoleProps> = ({ financialResults, 
                   </span>
                 </span>
                 <span className="min-w-0 space-y-1.5">
-                  <span className="flex h-[5px] bg-ink-line overflow-hidden" title="Survival / cash-out risk">
+                  <span className="flex h-[5px] bg-ink-line overflow-hidden" title="Share of what-if scenarios that stay above the cushion">
                     <span className="h-full transition-[width] duration-500 ease-editorial" style={{ width: `${s}%`, background: st.color }} />
                   </span>
-                  <span className="grid grid-cols-3 gap-1 font-mono text-[10px] tabular-nums text-ink-dim">
-                    <span>cash-out <b className="font-normal block text-ink" style={{ color: (sr?.cash_out_risk_pct ?? r.metrics.cash_out_risk_pct) > 0 ? BAD : undefined }}>{sr?.cash_out_risk_pct ?? r.metrics.cash_out_risk_pct}%</b></span>
-                    <span>below floor <b className="font-normal block text-ink">{sr?.floor_breach_risk_pct ?? r.metrics.floor_breach_risk_pct}%</b></span>
-                    <span>P10 low <b className="font-normal block" style={{ color: (sr?.p10_worst_balance ?? r.metrics.p10_worst_balance) < 0 ? BAD : '#141414' }}>{fmtRs(sr?.p10_worst_balance ?? r.metrics.p10_worst_balance)}</b></span>
+                  <span className="grid grid-cols-2 gap-1 font-mono text-[10px] tabular-nums text-ink-dim">
+                    <span>typical low <b className="font-normal block text-ink">{fmtRs(sr?.p50_worst_balance ?? r.metrics.lowest_balance)}</b></span>
+                    <span>bad-case low <b className="font-normal block" style={{ color: (sr?.p10_worst_balance ?? r.metrics.p10_worst_balance) < (sr ? stress!.emergency_floor : r.metrics.emergency_floor) ? BAD : '#141414' }}>{fmtRs(sr?.p10_worst_balance ?? r.metrics.p10_worst_balance)}</b></span>
                   </span>
                 </span>
               </button>
