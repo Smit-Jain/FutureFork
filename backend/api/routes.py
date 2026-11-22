@@ -79,6 +79,9 @@ class CommitRequest(BaseModel):
     monthly_income: Optional[float] = Field(
         None, description="Monthly income (₹). Use when the file has no income rows, e.g. an expenses-only export."
     )
+    fx_rate: Optional[float] = Field(
+        None, gt=0, description="Rupees per unit of the file's currency (e.g. 88 for USD). Converts the amounts to ₹."
+    )
 
 
 class CreateDecisionRequest(BaseModel):
@@ -213,6 +216,12 @@ async def inspect_dataset(
     if not (proposed_mapping.get("amount_col") or proposed_mapping.get("debit_col") or proposed_mapping.get("credit_col")):
         notes.append("Couldn't tell which column holds the amounts. Please pick it below.")
 
+    units = _detect_units(df, proposed_mapping)
+    if units["scale_label"]:
+        notes.append(f"Amounts are in {units['scale_label']}s; they will be expanded to full numbers.")
+    if units["currency"] != "INR":
+        notes.append(f"Amounts look like {units['currency']}. Enter an exchange rate to convert them to ₹.")
+
     upload_id = f"upl_{uuid.uuid4().hex[:16]}"
     Repository(db).save_upload(
         upload_id=upload_id,
@@ -236,6 +245,32 @@ async def inspect_dataset(
         "row_count": int(len(df)),
         "warnings": notes,
         "ttl_seconds": UPLOAD_TTL_MINUTES * 60,
+        "units": units,
+    }
+
+
+# Approximate rupee rates, only to pre-fill the exchange-rate box; the user confirms the rate
+_FX_HINTS = {"USD": 88.0, "EUR": 102.0, "GBP": 117.0}
+
+
+def _detect_units(df: Any, mapping: Dict[str, Any]) -> Dict[str, Any]:
+    """Currency and scale of the amount columns, so the UI can confirm them before commit."""
+    from data.normalize import cell_suffix_share, detect_currency, detect_scale
+
+    cols = [c for c in (mapping.get("amount_col"), mapping.get("debit_col"), mapping.get("credit_col")) if c and c in df]
+    values = df[cols].stack() if cols else df.iloc[:0, :0].stack()
+    currency = detect_currency(values, list(df.columns)) or "INR"
+    scale, label = 1.0, None
+    for c in cols:
+        scale, label = detect_scale(c)
+        if label:
+            break
+    return {
+        "currency": currency,
+        "scale": scale,
+        "scale_label": label,
+        "cell_units": bool(cols) and cell_suffix_share(values) > 0,
+        "suggested_fx_rate": _FX_HINTS.get(currency),
     }
 
 
@@ -275,6 +310,7 @@ def commit_dataset(req: CommitRequest, db: Session = Depends(get_db), user: User
             name=ds_name,
             starting_balance=req.starting_balance,
             monthly_income=req.monthly_income,
+            fx_rate=req.fx_rate,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail={"error": "INGEST_FAILED", "message": str(exc)})

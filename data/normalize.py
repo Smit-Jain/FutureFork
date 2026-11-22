@@ -192,13 +192,57 @@ def detect_currency(values: pd.Series, headers: Optional[List[str]] = None) -> O
     return None
 
 
-def parse_amount_series(series: pd.Series) -> Tuple[pd.Series, pd.Series]:
+# Scale written in a column header, e.g. "Revenue (USD mn)", "Amount in lakhs", "₹ Cr", "'000".
+# Checked in this order; a bare "Cr" is not treated as crore because it usually means credit.
+_SCALE_PATTERNS: List[Tuple[float, str, "re.Pattern[str]"]] = [
+    (1e7, "crore", re.compile(r"(?i)\bcrores?\b|\bin\s+cr\.?\b|(?:₹|\brs\.?|\binr)\s*cr\.?\b")),
+    (1e5, "lakh", re.compile(r"(?i)\blakhs?\b|\blacs?\b|\bin\s+l\b|(?:₹|\brs\.?|\binr)\s*l\b")),
+    (1e9, "billion", re.compile(r"(?i)\bbillions?\b|\bbn\b|\bin\s+b\b|(?:\$|\busd)\s*b\b")),
+    (1e6, "million", re.compile(r"(?i)\bmillions?\b|\bmn\b|\bmm\b|\bin\s+m\b|(?:\$|\busd|\beur|€|£|\bgbp)\s*m\b|\(\s*m\s*\)")),
+    (1e3, "thousand", re.compile(r"(?i)\bthousands?\b|'000s?|\b000s\b|\(\s*000s?\s*\)|\bin\s+k\b|\(\s*k\s*\)|(?:\$|\busd)\s*k\b")),
+]
+
+# Unit written in a cell, e.g. "1.2M", "3.5bn", "2.4 lakh", "5 crore", "750k".
+# A trailing "Cr"/"Dr" is a credit/debit marker and is handled separately.
+_CELL_SUFFIX_RE = re.compile(
+    r"(?i)^([\d.,]+)(thousands?|k|millions?|mn|mm|m|billions?|bn|b|lakhs?|lacs?|l|crores?)$"
+)
+_SUFFIX_MULT = {
+    "k": 1e3, "thousand": 1e3, "thousands": 1e3,
+    "m": 1e6, "mn": 1e6, "mm": 1e6, "million": 1e6, "millions": 1e6,
+    "b": 1e9, "bn": 1e9, "billion": 1e9, "billions": 1e9,
+    "l": 1e5, "lac": 1e5, "lacs": 1e5, "lakh": 1e5, "lakhs": 1e5,
+    "crore": 1e7, "crores": 1e7,
+}
+
+
+def detect_scale(header: Optional[str]) -> Tuple[float, Optional[str]]:
+    """(multiplier, unit name) written in a column header; (1.0, None) when there is none."""
+    text = str(header or "")
+    for mult, name, pat in _SCALE_PATTERNS:
+        if pat.search(text):
+            return mult, name
+    return 1.0, None
+
+
+def cell_suffix_share(series: pd.Series) -> float:
+    """Share of non-empty cells that carry their own unit (1.2M, 3 lakh, ...)."""
+    s = series.dropna().astype(str).str.replace(_CURRENCY_RE, "", regex=True).str.replace(r"\s+", "", regex=True)
+    s = s.str.strip("()+-")
+    s = s[s != ""]
+    if s.empty:
+        return 0.0
+    return float(s.str.match(_CELL_SUFFIX_RE).mean())
+
+
+def parse_amount_series(series: pd.Series, scale: float = 1.0) -> Tuple[pd.Series, pd.Series]:
     """
     Parses an amount column into floats.
 
     Returns (values, drcr_sign): values keep the sign written in the cell (parentheses,
     minus signs), and drcr_sign is -1 for a "Dr" marker, +1 for "Cr", 0 when absent.
-    Unparseable cells become NaN.
+    Units written in a cell (1.2M, 3 lakh, 5 crore, 750k) are applied, then the whole
+    column is multiplied by `scale` (from its header, e.g. "USD mn"). Unparseable cells become NaN.
     """
     s = series.astype(str).str.strip()
     s = s.where(~s.str.fullmatch(r"(?i)(nan|none|null|-|—|–|)"), "")
@@ -212,6 +256,12 @@ def parse_amount_series(series: pd.Series) -> Tuple[pd.Series, pd.Series]:
     neg = s.str.match(r"^\(.*\)$") | s.str.endswith("-") | s.str.startswith("-")
     s = s.str.strip("()+-")
 
+    # Per-cell units: keep the number, remember its multiplier
+    suffix = s.str.extract(_CELL_SUFFIX_RE)
+    has_unit = suffix[0].notna()
+    cell_mult = suffix[1].str.lower().map(_SUFFIX_MULT).where(has_unit, 1.0).astype(float)
+    s = s.where(~has_unit, suffix[0])
+
     nonempty = s[s != ""]
     eu_votes = nonempty.str.match(_EU_RE).sum()
     us_votes = nonempty.str.match(_US_RE).sum()
@@ -220,7 +270,7 @@ def parse_amount_series(series: pd.Series) -> Tuple[pd.Series, pd.Series]:
     else:
         s = s.str.replace(",", "", regex=False)
 
-    values = pd.to_numeric(s, errors="coerce")
+    values = pd.to_numeric(s, errors="coerce") * cell_mult * float(scale or 1.0)
     values = values.where(~neg, -values)
     return values.astype(float), drcr_sign
 

@@ -174,3 +174,53 @@ def test_header_only_detection():
 def test_unreadable_files_raise_clear_errors(raw, message):
     with pytest.raises(UnreadableFileError, match=message):
         load_table(raw)
+
+
+# ─── Units and currency ─────────────────────────────────────────────────────
+
+def test_cell_units_are_expanded_and_dr_cr_still_works():
+    import pandas as pd
+
+    from data.normalize import parse_amount_series
+
+    vals, drcr = parse_amount_series(pd.Series(["$1.2M", "USD 2.4mn", "₹2.4 lakh", "5 crore", "750k", "3.5bn", "1,500 Cr", "(0.8M)"]))
+    assert vals.tolist() == [1_200_000, 2_400_000, 240_000, 50_000_000, 750_000, 3_500_000_000, 1_500, -800_000]
+    assert drcr.tolist() == [0, 0, 0, 0, 0, 0, 1, 0]  # "Cr" is a credit marker, not crore
+
+
+@pytest.mark.parametrize("header,mult", [
+    ("Amount (USD, in millions)", 1e6), ("Revenue USD mn", 1e6), ("Amount ($m)", 1e6),
+    ("Amount in lakhs", 1e5), ("Amount (₹ Cr)", 1e7), ("Balance (in Rs. crore)", 1e7),
+    ("Value '000", 1e3), ("Amount (Cr)", 1.0), ("Credit", 1.0), ("Amount (INR)", 1.0),
+])
+def test_scale_from_header(header, mult):
+    from data.normalize import detect_scale
+
+    assert detect_scale(header)[0] == mult
+
+
+USD_MN_PNL = """Date,Description,Amount (USD mn),Type
+2024-04-05,Customer payments,0.30,inflow
+2024-04-20,Payroll,0.12,outflow
+2024-05-05,Customer payments,0.30,inflow
+2024-05-20,Payroll,0.12,outflow
+"""
+
+
+def test_usd_millions_file_is_scaled_and_converted_to_rupees():
+    inst = FinancialIngestor.compile(USD_MN_PNL.encode(), starting_balance=10_000_000, fx_rate=88.0)
+    # 0.30 USD mn × 88 = ₹2,64,00,000 in; 0.12 USD mn × 88 = ₹1,05,60,000 out (observed months)
+    assert inst.inflows[0] == pytest.approx(26_400_000)
+    assert inst.outflow_matrix[0].sum() == pytest.approx(10_560_000)
+    assert inst.starting_balance == 10_000_000  # entered in rupees, never converted
+    summary = inst.raw_metadata
+    assert summary["source_currency"] == "USD" and summary["currency"] == "INR" and summary["fx_rate"] == 88.0
+    assert any("millions" in w for w in summary["warnings"])
+    assert any("converted at ₹88.00 per USD" in w for w in summary["warnings"])
+
+
+def test_foreign_currency_without_rate_is_used_as_is_with_a_warning():
+    inst = FinancialIngestor.compile(USD_MN_PNL.encode(), starting_balance=0)
+    assert inst.inflows[0] == pytest.approx(300_000)  # scaled, not converted
+    assert inst.raw_metadata["currency"] == "USD"
+    assert any("Re-upload with an exchange rate" in w for w in inst.raw_metadata["warnings"])

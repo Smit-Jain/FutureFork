@@ -262,6 +262,8 @@
     "observed_months": 12,
     "projected_months": [],
     "currency": "INR",
+    "source_currency": "INR",
+    "fx_rate": null,
     "detected_mapping": {
       "date_col": "Date",
       "amount_col": null,

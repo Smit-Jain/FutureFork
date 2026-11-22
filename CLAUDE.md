@@ -104,5 +104,5 @@ The single engine entry point is `engine.solver.evaluate_financial_branch(instan
 
 - Without `OPENAI_API_KEY`/`GROQ_API_KEY` (or with `FUTUREFORK_OFFLINE=1`), every AI agent uses its deterministic fallback. Both paths must work.
 - The 12-month horizon replays the calendar months of the uploaded data; months beyond the data are projected from averages (`raw_metadata["projected_months"]`).
-- Amounts in other currencies are used as-is and shown with ₹ (a warning is raised).
+- Units are read from amount headers ("USD mn", "in lakhs", "₹ Cr", "'000") and cells (1.2M, 3 lakh, 5 crore); a bare "Cr" is a credit marker, never crore. Foreign-currency files are converted with the user's `fx_rate` at commit (₹ per unit); without one they're used as-is with a warning.
 - `ruff` isn't bundled as a binary in the venv on every machine; install it separately if `python -m ruff` fails.

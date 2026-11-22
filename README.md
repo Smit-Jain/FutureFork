@@ -99,7 +99,9 @@ FutureFork reads real exports as they are, with no reformatting needed:
 
 Anything FutureFork had to assume is shown under **About your data** before you decide.
 
-**Known limits**: amounts in other currencies are used as-is and shown with ₹ (a warning is shown); a prompt with two decisions ("sell my car and buy a new one") models only the first; the 12-month view replays the calendar months of your data rather than starting from today.
+**Units and currency**: scales in headers ("Amount (USD mn)", "in lakhs", "₹ Cr", "'000") and in cells (1.2M, 3 lakh, 5 crore, 750k) are expanded; USD, EUR and GBP files are converted to ₹ with an exchange rate you confirm at upload.
+
+**Known limits**: a prompt with two decisions ("sell my car and buy a new one") models only the first; the 12-month view replays the calendar months of your data rather than starting from today.
 
 ---
 

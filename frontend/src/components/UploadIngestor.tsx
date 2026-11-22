@@ -39,6 +39,7 @@ export const UploadIngestor: React.FC<UploadIngestorProps> = ({ onDatasetReady }
   const [openingBalance, setOpeningBalance] = useState('');
   const [monthlyIncome, setMonthlyIncome] = useState('');
   const [datasetName, setDatasetName] = useState('');
+  const [fxRate, setFxRate] = useState('');
   const [isInspecting, setIsInspecting] = useState(false);
   const [isCommitting, setIsCommitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,6 +57,7 @@ export const UploadIngestor: React.FC<UploadIngestorProps> = ({ onDatasetReady }
       setDatasetName(file.name.replace(/\.(csv|tsv|txt|xlsx)$/i, '').replace(/[_-]+/g, ' '));
       setOpeningBalance('');
       setMonthlyIncome('');
+      setFxRate(result.units?.suggested_fx_rate ? String(result.units.suggested_fx_rate) : '');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to inspect file');
     } finally {
@@ -94,6 +96,12 @@ export const UploadIngestor: React.FC<UploadIngestorProps> = ({ onDatasetReady }
       setError('Opening balance and monthly income must be numbers, e.g. 285000.');
       return;
     }
+    const foreign = !!inspectResult.units && inspectResult.units.currency !== 'INR';
+    const fx = foreign ? toNumber(fxRate) : undefined;
+    if (foreign && (fx === undefined || isNaN(fx) || fx <= 0)) {
+      setError(`Enter how many rupees one ${inspectResult.units!.currency} is worth, e.g. 88.`);
+      return;
+    }
     setIsCommitting(true);
     setError(null);
     try {
@@ -104,6 +112,7 @@ export const UploadIngestor: React.FC<UploadIngestorProps> = ({ onDatasetReady }
         starting_balance: balance,
         monthly_income: income,
         dataset_type: datasetType,
+        fx_rate: fx,
       });
       onDatasetReady(result.dataset_id, result.name, result.dataset_type, result.warnings ?? []);
     } catch (err: unknown) {
@@ -208,6 +217,46 @@ export const UploadIngestor: React.FC<UploadIngestorProps> = ({ onDatasetReady }
             <div className="px-4 py-3 border border-warn/40 bg-warn/5 text-sm space-y-1">
               <div className="label text-warn">About your file</div>
               {inspectResult.warnings.map((w) => <div key={w}>{w}</div>)}
+            </div>
+          )}
+
+          {inspectResult.units && (inspectResult.units.currency !== 'INR' || inspectResult.units.scale_label || inspectResult.units.cell_units) && (
+            <div className="relative brackets border border-ink bg-paper-2 p-5 grid grid-cols-1 md:grid-cols-[1fr_auto] gap-5 items-center">
+              <div className="space-y-1.5">
+                <div className="label">Units we found</div>
+                <p className="text-xl tracking-tight">
+                  Amounts read as{' '}
+                  <strong className="font-medium">
+                    {inspectResult.units.currency}
+                    {inspectResult.units.scale_label ? ` ${inspectResult.units.scale_label}s` : ''}
+                  </strong>
+                  {inspectResult.units.cell_units && <span className="text-ink-dim"> · units like 1.2M expanded</span>}
+                </p>
+                <p className="text-[13px] text-ink-dim">
+                  {inspectResult.units.scale_label
+                    ? `A value of 1.5 in the file becomes ${(1.5 * inspectResult.units.scale).toLocaleString(inspectResult.units.currency === 'INR' ? 'en-IN' : 'en-US')} ${inspectResult.units.currency}. `
+                    : ''}
+                  {inspectResult.units.currency !== 'INR'
+                    ? 'Everything is converted to rupees with the rate on the right, so every result is in ₹.'
+                    : 'Everything stays in rupees.'}
+                </p>
+              </div>
+              {inspectResult.units.currency !== 'INR' && (
+                <label className="space-y-1 block min-w-[220px]">
+                  <span className="label block">₹ per 1 {inspectResult.units.currency}</span>
+                  <span className="flex items-center border border-ink bg-paper focus-within:bg-white/60">
+                    <span className="pl-3 font-mono text-sm text-ink-dim">₹</span>
+                    <input
+                      value={fxRate}
+                      onChange={(e) => setFxRate(e.target.value)}
+                      inputMode="decimal"
+                      aria-label={`Rupees per ${inspectResult.units.currency}`}
+                      className="flex-1 min-w-0 bg-transparent px-2 py-2 font-mono tabular-nums outline-none"
+                    />
+                  </span>
+                  <span className="block text-[11.5px] text-ink-dim">Pre-filled with an approximate rate. Use today's rate.</span>
+                </label>
+              )}
             </div>
           )}
 

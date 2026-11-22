@@ -38,6 +38,15 @@ export interface InspectResponse {
   row_count: number;
   warnings: string[];
   ttl_seconds: number;
+  units?: DetectedUnits;
+}
+
+export interface DetectedUnits {
+  currency: string;               // "INR", "USD", "EUR", "GBP"
+  scale: number;                  // multiplier from the column header, e.g. 1e6 for "USD mn"
+  scale_label: string | null;     // "million", "lakh", ...
+  cell_units: boolean;            // cells carry their own units, e.g. "1.2M"
+  suggested_fx_rate: number | null; // approximate ₹ per unit, to pre-fill the rate box
 }
 
 export interface CommitRequest {
@@ -47,6 +56,7 @@ export interface CommitRequest {
   starting_balance?: number;
   dataset_type?: DatasetType;
   monthly_income?: number;      // for expenses-only files
+  fx_rate?: number;             // ₹ per unit of the file's currency
 }
 
 export interface DatasetStats {
