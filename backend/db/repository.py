@@ -20,6 +20,7 @@ from backend.db.models import (
     ResultModel,
     RunModel,
     ScenarioModel,
+    TaxProfileModel,
     UploadModel,
     UserModel,
 )
@@ -438,3 +439,91 @@ class Repository:
         entry = CacheModel(cache_key=key, result=val)
         self.db.merge(entry)
         self.db.commit()
+
+    # ------------------------------------------------------------------
+    # ITR helper: tax profiles (always owned by one user)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _iso(dt: Optional[datetime]) -> Optional[str]:
+        return (dt.isoformat() + "Z") if dt else None  # stored as naive UTC
+
+    def _tax_dict(self, row: TaxProfileModel) -> Dict[str, Any]:
+        return {
+            "id": row.id,
+            "label": row.label,
+            "fy": row.fy,
+            "inputs": row.inputs,
+            "report": row.report,
+            "created_at": self._iso(row.created_at),
+            "updated_at": self._iso(row.updated_at),
+        }
+
+    def get_tax_profile(self, profile_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        row = (
+            self.db.query(TaxProfileModel)
+            .filter(TaxProfileModel.id == profile_id, TaxProfileModel.user_id == user_id)
+            .first()
+        )
+        return self._tax_dict(row) if row else None
+
+    def save_tax_profile(
+        self,
+        user_id: str,
+        label: str,
+        inputs: Dict[str, Any],
+        report: Optional[Dict[str, Any]],
+        profile_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Create, or update the caller's own profile. Returns None if profile_id isn't theirs."""
+        from backend.db.models import utcnow
+
+        if profile_id:
+            row = (
+                self.db.query(TaxProfileModel)
+                .filter(TaxProfileModel.id == profile_id, TaxProfileModel.user_id == user_id)
+                .first()
+            )
+            if row is None:
+                return None
+        else:
+            row = TaxProfileModel(id=f"tax_{uuid.uuid4().hex[:16]}", user_id=user_id, created_at=utcnow())
+            self.db.add(row)
+        row.label, row.fy, row.inputs, row.report = label, inputs.get("fy", "2025-26"), inputs, report
+        row.updated_at = utcnow()
+        self.db.commit()
+        self.db.refresh(row)
+        return self._tax_dict(row)
+
+    def delete_tax_profile(self, profile_id: str, user_id: str) -> bool:
+        n = (
+            self.db.query(TaxProfileModel)
+            .filter(TaxProfileModel.id == profile_id, TaxProfileModel.user_id == user_id)
+            .delete()
+        )
+        self.db.commit()
+        return n > 0
+
+    def list_tax_profiles(self, user_id: str, limit: int = 100) -> List[Dict[str, Any]]:
+        rows = (
+            self.db.query(TaxProfileModel)
+            .filter(TaxProfileModel.user_id == user_id)
+            .order_by(TaxProfileModel.updated_at.desc(), TaxProfileModel.id.desc())
+            .limit(limit)
+            .all()
+        )
+        out = []
+        for r in rows:
+            report = r.report or {}
+            out.append(
+                {
+                    "id": r.id,
+                    "label": r.label,
+                    "fy": r.fy,
+                    "taxpayer_type": (r.inputs or {}).get("taxpayer_type", "salaried"),
+                    "headline": (report.get("verdict") or {}).get("headline"),
+                    "form": (report.get("form") or {}).get("form"),
+                    "updated_at": self._iso(r.updated_at),
+                }
+            )
+        return out

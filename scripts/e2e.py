@@ -141,6 +141,16 @@ class DirectClient:
     def health(self) -> dict:
         return routes.health_check()
 
+    def save_tax_profile(self, inputs: dict) -> dict:
+        from backend.api import tax_routes
+        from contracts.schemas import TaxInputsModel, TaxProfileSave
+        req = TaxProfileSave(inputs=TaxInputsModel(**inputs))
+        return tax_routes.create_profile(req, db=self.db, user=self.user)
+
+    def list_tax_profiles(self) -> list:
+        from backend.api import tax_routes
+        return tax_routes.list_profiles(db=self.db, user=self.user)["items"]
+
     def close(self):
         self.db.close()
 
@@ -204,6 +214,12 @@ class LiveClient:
 
     def health(self) -> dict:
         return self.c.get("/health").json()
+
+    def save_tax_profile(self, inputs: dict) -> dict:
+        return self.c.post("/tax/profiles", json={"inputs": inputs}).json()
+
+    def list_tax_profiles(self) -> list:
+        return self.c.get("/tax/profiles").json()["items"]
 
     def close(self):
         self.c.close()
@@ -385,6 +401,18 @@ def run_e2e(base_url: str = None, csv_path: str = None):
                 )
             except Exception as exc2:
                 ok(False, f"Prompt failed: \"{prompt[:55]}…\"", str(exc2))
+
+        # ── 11. ITR helper ───────────────────────────────────────────
+        section("11. ITR helper  (tax engine + guarded explanation)")
+        tax = client.save_tax_profile({"basic_da": 600_000, "other_salary": 700_000, "tds": 20_000})
+        report = tax.get("report") or {}
+        ok(report.get("new", {}).get("total_tax") == 26_000, "13L salary → ₹26,000 new-regime tax (marginal relief)")
+        ok(report.get("form", {}).get("form") == "ITR-1", "Recommends ITR-1")
+        ok((report.get("explanation") or {}).get("guard_passed") is True, "Tax explanation passed the Numeric Guard")
+        ok(any(p["id"] == tax.get("id") for p in client.list_tax_profiles()), "Saved return appears in the list")
+        free = client.save_tax_profile({"taxpayer_type": "freelancer", "gross_receipts": 4_000_000,
+                                        "digital_receipts": 4_000_000})
+        ok((free.get("report") or {}).get("form", {}).get("form") == "ITR-4", "44ADA freelancer → ITR-4")
 
     finally:
         loop.close() if not base_url else None

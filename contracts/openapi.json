@@ -682,6 +682,306 @@
           }
         }
       }
+    },
+    "/tax/rules": {
+      "get": {
+        "tags": [
+          "tax"
+        ],
+        "summary": "Tax Rules",
+        "operationId": "tax_rules_tax_rules_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaxRulesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tax/compute": {
+      "post": {
+        "tags": [
+          "tax"
+        ],
+        "summary": "Tax Compute",
+        "description": "Live preview while the user types: engine numbers, no saving, no LLM unless asked.",
+        "operationId": "tax_compute_tax_compute_post",
+        "parameters": [
+          {
+            "name": "explain",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Explain"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaxInputsModel"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaxReport"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tax/profiles": {
+      "get": {
+        "tags": [
+          "tax"
+        ],
+        "summary": "List Profiles",
+        "operationId": "list_profiles_tax_profiles_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaxProfileList"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "tax"
+        ],
+        "summary": "Create Profile",
+        "operationId": "create_profile_tax_profiles_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaxProfileSave"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaxProfile"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tax/profiles/{profile_id}": {
+      "get": {
+        "tags": [
+          "tax"
+        ],
+        "summary": "Get Profile",
+        "operationId": "get_profile_tax_profiles__profile_id__get",
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Profile Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaxProfile"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "tax"
+        ],
+        "summary": "Update Profile",
+        "operationId": "update_profile_tax_profiles__profile_id__put",
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Profile Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaxProfileSave"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaxProfile"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "tax"
+        ],
+        "summary": "Delete Profile",
+        "operationId": "delete_profile_tax_profiles__profile_id__delete",
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Profile Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tax/profiles/{profile_id}/export": {
+      "get": {
+        "tags": [
+          "tax"
+        ],
+        "summary": "Export Profile",
+        "operationId": "export_profile_tax_profiles__profile_id__export_get",
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Profile Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -845,6 +1145,61 @@
         ],
         "title": "ChangeSpec"
       },
+      "ChecklistField": {
+        "properties": {
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "value": {
+            "type": "number",
+            "title": "Value"
+          },
+          "where": {
+            "type": "string",
+            "title": "Where",
+            "description": "Where it goes on the e-filing portal"
+          }
+        },
+        "type": "object",
+        "required": [
+          "label",
+          "value",
+          "where"
+        ],
+        "title": "ChecklistField"
+      },
+      "ChecklistStep": {
+        "properties": {
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/ChecklistField"
+            },
+            "type": "array",
+            "title": "Fields"
+          }
+        },
+        "type": "object",
+        "required": [
+          "n",
+          "title",
+          "detail",
+          "fields"
+        ],
+        "title": "ChecklistStep"
+      },
       "CommitRequest": {
         "properties": {
           "upload_id": {
@@ -941,6 +1296,19 @@
           },
           "explanation": {
             "$ref": "#/components/schemas/Explanation"
+          },
+          "answer": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answer",
+            "description": "Max safe amount, best month and shortfall for one-time decisions (engine/answers.py)"
           }
         },
         "type": "object",
@@ -1022,6 +1390,94 @@
           "guard_passed"
         ],
         "title": "Explanation"
+      },
+      "FilingChecklist": {
+        "properties": {
+          "form": {
+            "type": "string",
+            "title": "Form"
+          },
+          "regime": {
+            "type": "string",
+            "enum": [
+              "new",
+              "old"
+            ],
+            "title": "Regime"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/ChecklistStep"
+            },
+            "type": "array",
+            "title": "Steps"
+          },
+          "documents": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Documents"
+          }
+        },
+        "type": "object",
+        "required": [
+          "form",
+          "regime",
+          "steps",
+          "documents"
+        ],
+        "title": "FilingChecklist"
+      },
+      "FilingWindow": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "planning",
+              "on_time",
+              "belated",
+              "closed"
+            ],
+            "title": "Status"
+          },
+          "section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section"
+          },
+          "due_date": {
+            "type": "string",
+            "title": "Due Date"
+          },
+          "belated_until": {
+            "type": "string",
+            "title": "Belated Until"
+          },
+          "old_regime_allowed": {
+            "type": "boolean",
+            "title": "Old Regime Allowed"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "due_date",
+          "belated_until",
+          "old_regime_allowed",
+          "message"
+        ],
+        "title": "FilingWindow"
       },
       "FinancialMetrics": {
         "properties": {
@@ -1429,6 +1885,43 @@
         ],
         "title": "HistoryResponse"
       },
+      "ItrFormChoice": {
+        "properties": {
+          "form": {
+            "type": "string",
+            "enum": [
+              "ITR-1",
+              "ITR-2",
+              "ITR-3",
+              "ITR-4"
+            ],
+            "title": "Form"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "supported": {
+            "type": "boolean",
+            "title": "Supported"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reasons"
+          }
+        },
+        "type": "object",
+        "required": [
+          "form",
+          "name",
+          "supported",
+          "reasons"
+        ],
+        "title": "ItrFormChoice"
+      },
       "MetricDistribution": {
         "properties": {
           "mean": {
@@ -1768,6 +2261,991 @@
           "balance_p90"
         ],
         "title": "StressedResult"
+      },
+      "TaxBreakdown": {
+        "properties": {
+          "regime": {
+            "type": "string",
+            "enum": [
+              "new",
+              "old"
+            ],
+            "title": "Regime"
+          },
+          "gross_total_income": {
+            "type": "number",
+            "title": "Gross Total Income"
+          },
+          "total_deductions": {
+            "type": "number",
+            "title": "Total Deductions"
+          },
+          "taxable_income": {
+            "type": "number",
+            "title": "Taxable Income"
+          },
+          "slab_tax": {
+            "type": "number",
+            "title": "Slab Tax"
+          },
+          "special_rate_tax": {
+            "type": "number",
+            "title": "Special Rate Tax"
+          },
+          "rebate": {
+            "type": "number",
+            "title": "Rebate"
+          },
+          "surcharge": {
+            "type": "number",
+            "title": "Surcharge"
+          },
+          "cess": {
+            "type": "number",
+            "title": "Cess"
+          },
+          "total_tax": {
+            "type": "number",
+            "title": "Total Tax"
+          },
+          "taxes_paid": {
+            "type": "number",
+            "title": "Taxes Paid"
+          },
+          "payable": {
+            "type": "number",
+            "title": "Payable"
+          },
+          "refund": {
+            "type": "number",
+            "title": "Refund"
+          },
+          "effective_rate_pct": {
+            "type": "number",
+            "title": "Effective Rate Pct"
+          },
+          "heads": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Heads"
+          },
+          "exemptions": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Exemptions"
+          },
+          "deductions": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Deductions"
+          },
+          "presumptive": {
+            "$ref": "#/components/schemas/TaxPresumptive"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/TaxLine"
+            },
+            "type": "array",
+            "title": "Lines"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Notes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "regime",
+          "gross_total_income",
+          "total_deductions",
+          "taxable_income",
+          "slab_tax",
+          "special_rate_tax",
+          "rebate",
+          "surcharge",
+          "cess",
+          "total_tax",
+          "taxes_paid",
+          "payable",
+          "refund",
+          "effective_rate_pct",
+          "heads",
+          "exemptions",
+          "deductions",
+          "presumptive",
+          "lines",
+          "notes"
+        ],
+        "title": "TaxBreakdown"
+      },
+      "TaxExplanation": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "llm",
+              "template"
+            ],
+            "title": "Source"
+          },
+          "guard_passed": {
+            "type": "boolean",
+            "title": "Guard Passed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "text",
+          "source",
+          "guard_passed"
+        ],
+        "title": "TaxExplanation"
+      },
+      "TaxInputsModel": {
+        "properties": {
+          "fy": {
+            "type": "string",
+            "title": "Fy",
+            "default": "2025-26"
+          },
+          "taxpayer_type": {
+            "type": "string",
+            "enum": [
+              "salaried",
+              "freelancer",
+              "business"
+            ],
+            "title": "Taxpayer Type",
+            "default": "salaried"
+          },
+          "age_band": {
+            "type": "string",
+            "enum": [
+              "below_60",
+              "60_to_80",
+              "above_80"
+            ],
+            "title": "Age Band",
+            "default": "below_60"
+          },
+          "resident": {
+            "type": "boolean",
+            "title": "Resident",
+            "default": true
+          },
+          "basic_da": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Basic Da",
+            "default": 0
+          },
+          "hra_received": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Hra Received",
+            "default": 0
+          },
+          "other_salary": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Other Salary",
+            "default": 0
+          },
+          "employer_nps": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Employer Nps",
+            "default": 0
+          },
+          "professional_tax": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Professional Tax",
+            "default": 0
+          },
+          "rent_paid": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Rent Paid",
+            "default": 0
+          },
+          "metro_city": {
+            "type": "boolean",
+            "title": "Metro City",
+            "default": false
+          },
+          "gross_receipts": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Gross Receipts",
+            "default": 0
+          },
+          "digital_receipts": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Digital Receipts",
+            "default": 0
+          },
+          "declared_profit": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Declared Profit",
+            "default": 0
+          },
+          "home_loan_interest": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Home Loan Interest",
+            "default": 0
+          },
+          "let_out_rent": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Let Out Rent",
+            "default": 0
+          },
+          "let_out_municipal_tax": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Let Out Municipal Tax",
+            "default": 0
+          },
+          "let_out_loan_interest": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Let Out Loan Interest",
+            "default": 0
+          },
+          "savings_interest": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Savings Interest",
+            "default": 0
+          },
+          "deposit_interest": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Deposit Interest",
+            "default": 0
+          },
+          "dividends": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Dividends",
+            "default": 0
+          },
+          "other_income": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Other Income",
+            "default": 0
+          },
+          "stcg_111a": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Stcg 111A",
+            "default": 0
+          },
+          "ltcg_112a": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Ltcg 112A",
+            "default": 0
+          },
+          "d_80c": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "D 80C",
+            "default": 0
+          },
+          "d_80ccd1b": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "D 80Ccd1B",
+            "default": 0
+          },
+          "d_80d_self": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "D 80D Self",
+            "default": 0
+          },
+          "d_80d_parents": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "D 80D Parents",
+            "default": 0
+          },
+          "parents_senior": {
+            "type": "boolean",
+            "title": "Parents Senior",
+            "default": false
+          },
+          "d_80e": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "D 80E",
+            "default": 0
+          },
+          "tds": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Tds",
+            "default": 0
+          },
+          "tcs": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Tcs",
+            "default": 0
+          },
+          "advance_tax": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Advance Tax",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "TaxInputsModel",
+        "description": "What the taxpayer tells us. Annual rupees; all optional except the basics."
+      },
+      "TaxLine": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "amount": {
+            "type": "number",
+            "title": "Amount"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "description": "income | exemption | deduction | subtotal | tax | relief | total | paid | result | info"
+          },
+          "section": {
+            "type": "string",
+            "title": "Section",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "label",
+          "amount",
+          "kind"
+        ],
+        "title": "TaxLine"
+      },
+      "TaxMove": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          },
+          "extra_outlay": {
+            "type": "number",
+            "title": "Extra Outlay"
+          },
+          "tax_before": {
+            "type": "number",
+            "title": "Tax Before"
+          },
+          "tax_after": {
+            "type": "number",
+            "title": "Tax After"
+          },
+          "saving": {
+            "type": "number",
+            "title": "Saving"
+          },
+          "regime_after": {
+            "type": "string",
+            "enum": [
+              "new",
+              "old"
+            ],
+            "title": "Regime After"
+          },
+          "benefit": {
+            "type": "boolean",
+            "title": "Benefit"
+          },
+          "locks_money": {
+            "type": "boolean",
+            "title": "Locks Money"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "title",
+          "detail",
+          "extra_outlay",
+          "tax_before",
+          "tax_after",
+          "saving",
+          "regime_after",
+          "benefit",
+          "locks_money"
+        ],
+        "title": "TaxMove"
+      },
+      "TaxPresumptive": {
+        "properties": {
+          "section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section"
+          },
+          "income": {
+            "type": "number",
+            "title": "Income"
+          },
+          "within_limit": {
+            "type": "boolean",
+            "title": "Within Limit"
+          },
+          "limit": {
+            "type": "number",
+            "title": "Limit"
+          }
+        },
+        "type": "object",
+        "required": [
+          "income",
+          "within_limit",
+          "limit"
+        ],
+        "title": "TaxPresumptive"
+      },
+      "TaxProfile": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "fy": {
+            "type": "string",
+            "title": "Fy"
+          },
+          "inputs": {
+            "$ref": "#/components/schemas/TaxInputsModel"
+          },
+          "report": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaxReport"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "fy",
+          "inputs"
+        ],
+        "title": "TaxProfile"
+      },
+      "TaxProfileList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TaxProfileSummary"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "TaxProfileList"
+      },
+      "TaxProfileSave": {
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "inputs": {
+            "$ref": "#/components/schemas/TaxInputsModel"
+          }
+        },
+        "type": "object",
+        "required": [
+          "inputs"
+        ],
+        "title": "TaxProfileSave"
+      },
+      "TaxProfileSummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "fy": {
+            "type": "string",
+            "title": "Fy"
+          },
+          "taxpayer_type": {
+            "type": "string",
+            "enum": [
+              "salaried",
+              "freelancer",
+              "business"
+            ],
+            "title": "Taxpayer Type"
+          },
+          "headline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headline"
+          },
+          "form": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Form"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "fy",
+          "taxpayer_type"
+        ],
+        "title": "TaxProfileSummary"
+      },
+      "TaxReport": {
+        "properties": {
+          "fy": {
+            "type": "string",
+            "title": "Fy"
+          },
+          "ay": {
+            "type": "string",
+            "title": "Ay"
+          },
+          "rules_status": {
+            "type": "string",
+            "enum": [
+              "filing",
+              "planning"
+            ],
+            "title": "Rules Status"
+          },
+          "as_of": {
+            "type": "string",
+            "title": "As Of"
+          },
+          "inputs": {
+            "$ref": "#/components/schemas/TaxInputsModel"
+          },
+          "new": {
+            "$ref": "#/components/schemas/TaxBreakdown"
+          },
+          "old": {
+            "$ref": "#/components/schemas/TaxBreakdown"
+          },
+          "cheaper": {
+            "type": "string",
+            "enum": [
+              "new",
+              "old"
+            ],
+            "title": "Cheaper"
+          },
+          "recommended": {
+            "type": "string",
+            "enum": [
+              "new",
+              "old"
+            ],
+            "title": "Recommended"
+          },
+          "regime_saving": {
+            "type": "number",
+            "title": "Regime Saving"
+          },
+          "window": {
+            "$ref": "#/components/schemas/FilingWindow"
+          },
+          "late_fee": {
+            "type": "number",
+            "title": "Late Fee"
+          },
+          "form": {
+            "$ref": "#/components/schemas/ItrFormChoice"
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/TaxVerdict"
+          },
+          "savings": {
+            "$ref": "#/components/schemas/TaxSavings"
+          },
+          "checklist": {
+            "$ref": "#/components/schemas/FilingChecklist"
+          },
+          "explanation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaxExplanation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "fy",
+          "ay",
+          "rules_status",
+          "as_of",
+          "inputs",
+          "new",
+          "old",
+          "cheaper",
+          "recommended",
+          "regime_saving",
+          "window",
+          "late_fee",
+          "form",
+          "verdict",
+          "savings",
+          "checklist"
+        ],
+        "title": "TaxReport"
+      },
+      "TaxRulesResponse": {
+        "properties": {
+          "default_fy": {
+            "type": "string",
+            "title": "Default Fy"
+          },
+          "years": {
+            "items": {
+              "$ref": "#/components/schemas/TaxYearInfo"
+            },
+            "type": "array",
+            "title": "Years"
+          }
+        },
+        "type": "object",
+        "required": [
+          "default_fy",
+          "years"
+        ],
+        "title": "TaxRulesResponse"
+      },
+      "TaxSavings": {
+        "properties": {
+          "fy": {
+            "type": "string",
+            "title": "Fy",
+            "description": "Year the moves are evaluated for (the next planning year)"
+          },
+          "baseline_tax": {
+            "type": "number",
+            "title": "Baseline Tax"
+          },
+          "baseline_regime": {
+            "type": "string",
+            "enum": [
+              "new",
+              "old"
+            ],
+            "title": "Baseline Regime"
+          },
+          "moves": {
+            "items": {
+              "$ref": "#/components/schemas/TaxMove"
+            },
+            "type": "array",
+            "title": "Moves"
+          }
+        },
+        "type": "object",
+        "required": [
+          "fy",
+          "baseline_tax",
+          "baseline_regime",
+          "moves"
+        ],
+        "title": "TaxSavings"
+      },
+      "TaxVerdict": {
+        "properties": {
+          "headline": {
+            "type": "string",
+            "title": "Headline"
+          },
+          "subline": {
+            "type": "string",
+            "title": "Subline"
+          },
+          "result": {
+            "type": "string",
+            "title": "Result"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "refund",
+              "payable",
+              "settled"
+            ],
+            "title": "Outcome"
+          },
+          "outcome_amount": {
+            "type": "number",
+            "title": "Outcome Amount"
+          },
+          "regime": {
+            "type": "string",
+            "enum": [
+              "new",
+              "old"
+            ],
+            "title": "Regime"
+          },
+          "saving_vs_other": {
+            "type": "number",
+            "title": "Saving Vs Other"
+          }
+        },
+        "type": "object",
+        "required": [
+          "headline",
+          "subline",
+          "result",
+          "outcome",
+          "outcome_amount",
+          "regime",
+          "saving_vs_other"
+        ],
+        "title": "TaxVerdict"
+      },
+      "TaxYearInfo": {
+        "properties": {
+          "fy": {
+            "type": "string",
+            "title": "Fy"
+          },
+          "ay": {
+            "type": "string",
+            "title": "Ay"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "filing",
+              "planning"
+            ],
+            "title": "Status"
+          },
+          "standard_deduction_new": {
+            "type": "number",
+            "title": "Standard Deduction New"
+          },
+          "standard_deduction_old": {
+            "type": "number",
+            "title": "Standard Deduction Old"
+          },
+          "rebate_limit_new": {
+            "type": "number",
+            "title": "Rebate Limit New"
+          },
+          "cap_80c": {
+            "type": "number",
+            "title": "Cap 80C"
+          },
+          "cap_80ccd1b": {
+            "type": "number",
+            "title": "Cap 80Ccd1B"
+          },
+          "cap_80d_self": {
+            "type": "number",
+            "title": "Cap 80D Self"
+          },
+          "cap_80d_self_senior": {
+            "type": "number",
+            "title": "Cap 80D Self Senior"
+          },
+          "cap_80d_parents": {
+            "type": "number",
+            "title": "Cap 80D Parents"
+          },
+          "cap_80d_parents_senior": {
+            "type": "number",
+            "title": "Cap 80D Parents Senior"
+          },
+          "cap_24b": {
+            "type": "number",
+            "title": "Cap 24B"
+          },
+          "ltcg_112a_exempt": {
+            "type": "number",
+            "title": "Ltcg 112A Exempt"
+          },
+          "limit_44ada": {
+            "type": "number",
+            "title": "Limit 44Ada"
+          },
+          "limit_44ada_digital": {
+            "type": "number",
+            "title": "Limit 44Ada Digital"
+          },
+          "limit_44ad": {
+            "type": "number",
+            "title": "Limit 44Ad"
+          },
+          "limit_44ad_digital": {
+            "type": "number",
+            "title": "Limit 44Ad Digital"
+          },
+          "due_date_salaried": {
+            "type": "string",
+            "title": "Due Date Salaried"
+          },
+          "due_date_business": {
+            "type": "string",
+            "title": "Due Date Business"
+          },
+          "belated_until": {
+            "type": "string",
+            "title": "Belated Until"
+          }
+        },
+        "type": "object",
+        "required": [
+          "fy",
+          "ay",
+          "status",
+          "standard_deduction_new",
+          "standard_deduction_old",
+          "rebate_limit_new",
+          "cap_80c",
+          "cap_80ccd1b",
+          "cap_80d_self",
+          "cap_80d_self_senior",
+          "cap_80d_parents",
+          "cap_80d_parents_senior",
+          "cap_24b",
+          "ltcg_112a_exempt",
+          "limit_44ada",
+          "limit_44ada_digital",
+          "limit_44ad",
+          "limit_44ad_digital",
+          "due_date_salaried",
+          "due_date_business",
+          "belated_until"
+        ],
+        "title": "TaxYearInfo"
       },
       "User": {
         "properties": {

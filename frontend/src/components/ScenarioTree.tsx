@@ -1,7 +1,7 @@
 import React from 'react';
 import { AlertTriangle, Loader2 } from 'lucide-react';
 import { BranchType, FinancialScenarioResult, Scenario } from '../contracts/types';
-import { FORK_COLORS, FORK_SHORT, riskStatus, riskTone, scoreTone } from '../theme/forks';
+import { FORK_COLORS, FORK_SHORT, fmtRs, pickBestFork, riskStatus, safeYears } from '../theme/forks';
 import { Pills, deltasVsBaseline } from './compare/deltas';
 import { TiltCard } from './fx/TiltCard';
 
@@ -24,6 +24,21 @@ const Metric: React.FC<{ label: string; value: string; color?: string }> = ({ la
     <span className="font-mono text-lg tabular-nums leading-tight" style={{ color }}>{value}</span>
   </span>
 );
+
+const tone = (ok: boolean, warn: boolean) => (ok ? '#2f7d4f' : warn ? '#c76a12' : '#d6345f');
+
+/** The three numbers every card shows, in plain words (technical terms live in the glossary). */
+const PlainMetrics: React.FC<{ r: FinancialScenarioResult; className: string }> = ({ r, className }) => {
+  const { safe, of } = safeYears(r);
+  const m = r.metrics;
+  return (
+    <span className={className}>
+      <Metric label="Stays safe" value={`${Math.round((safe / of) * 100)}%`} color={tone(safe / of >= 0.9, safe / of >= 0.7)} />
+      <Metric label="Lowest balance" value={fmtRs(m.lowest_balance)} color={m.lowest_balance < m.emergency_floor ? '#c76a12' : undefined} />
+      <Metric label="Extra interest" value={m.total_financing_interest > 0 ? fmtRs(m.total_financing_interest) : '₹0'} />
+    </span>
+  );
+};
 
 /** Full-width reference strip for Node 0. */
 const BaselineStrip: React.FC<{ scenario: Scenario; result?: FinancialScenarioResult; selected: boolean; hovered: boolean; onSelect: () => void; onHover?: (on: boolean) => void }> = ({
@@ -59,11 +74,7 @@ const BaselineStrip: React.FC<{ scenario: Scenario; result?: FinancialScenarioRe
         <span className="block text-base tracking-tight mt-1">{scenario.name}</span>
       </span>
       {m ? (
-        <span className="flex gap-8">
-          <Metric label="Survival" value={`${m.survival_score_pct}%`} color={scoreTone(m.survival_score_pct)} />
-          <Metric label="Cash-out" value={`${m.cash_out_risk_pct}%`} color={riskTone(m.cash_out_risk_pct)} />
-          <Metric label="Runway" value={`${m.runway_months}mo`} />
-        </span>
+        <PlainMetrics r={result!} className="flex gap-8" />
       ) : (
         <span className="label">Solving…</span>
       )}
@@ -81,14 +92,15 @@ interface ForkCardProps {
   onSelect: () => void;
   onHover?: (on: boolean) => void;
   index: number;
+  recommended?: boolean;
 }
 
-const ForkCard: React.FC<ForkCardProps> = ({ scenario, result, baseline, selected, dimmed, onSelect, onHover, index }) => {
+const ForkCard: React.FC<ForkCardProps> = ({ scenario, result, baseline, selected, dimmed, onSelect, onHover, index, recommended }) => {
   const branch = branchOf(scenario);
   const color = FORK_COLORS[branch];
   const m = result?.metrics;
   const pending = (scenario.status === 'running' || scenario.status === 'queued') && !result;
-  const st = m ? riskStatus(m.survival_score_pct) : null;
+  const st = m ? riskStatus(100 - m.floor_breach_risk_pct) : null;
 
   return (
     <TiltCard className="h-full" max={5} lift={selected ? 18 : 10}>
@@ -104,8 +116,13 @@ const ForkCard: React.FC<ForkCardProps> = ({ scenario, result, baseline, selecte
         className={`relative h-full w-full text-left p-4 preserve-3d flex flex-col transition-all duration-300
                     ${selected ? 'bg-paper-2 shadow-lift' : 'bg-paper-2/70 hover:bg-paper-2 shadow-paper'}
                     ${dimmed ? 'opacity-60' : ''} ${result ? 'cursor-pointer' : 'cursor-default'}`}
-        style={{ border: `1px solid ${selected ? '#141414' : 'rgba(20,20,20,.14)'}` }}
+        style={{ border: `1px solid ${selected || recommended ? '#141414' : 'rgba(20,20,20,.14)'}`, boxShadow: recommended ? `0 0 0 3px ${color}33` : undefined }}
       >
+        {recommended && (
+          <span className="absolute -top-3 right-3 z-10 px-2 h-6 inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.08em] text-paper" style={{ background: color, transform: 'translateZ(30px)' }}>
+            ★ Recommended
+          </span>
+        )}
         <span className="absolute left-0 top-0 right-0 h-[3px]" style={{ background: color }} />
         {selected && (
           <>
@@ -124,7 +141,7 @@ const ForkCard: React.FC<ForkCardProps> = ({ scenario, result, baseline, selecte
           </div>
           {pending && <Loader2 className="w-4 h-4 text-ink-dim animate-spin shrink-0" />}
           {scenario.status === 'failed' && <AlertTriangle className="w-4 h-4 text-bad shrink-0" />}
-          {st && (
+          {st && !recommended && (
             <span className="shrink-0 font-mono text-[9.5px] uppercase tracking-[0.06em] px-1.5 h-5 inline-flex items-center text-paper" style={{ background: st.color }}>
               {st.label}
             </span>
@@ -133,12 +150,8 @@ const ForkCard: React.FC<ForkCardProps> = ({ scenario, result, baseline, selecte
 
         {m ? (
           <div className="mt-3 space-y-3" style={{ transform: 'translateZ(26px)' }}>
-            <div className="grid grid-cols-3 gap-2 border-t border-ink-line pt-3">
-              <Metric label="Survival" value={`${m.survival_score_pct}%`} color={scoreTone(m.survival_score_pct)} />
-              <Metric label="Cash-out" value={`${m.cash_out_risk_pct}%`} color={riskTone(m.cash_out_risk_pct)} />
-              <Metric label="Runway" value={`${m.runway_months}mo`} />
-            </div>
-            <Pills pills={deltasVsBaseline(result!, baseline ?? null, 3)} />
+            <PlainMetrics r={result!} className="grid grid-cols-3 gap-2 border-t border-ink-line pt-3" />
+            <Pills pills={deltasVsBaseline(result!, baseline ?? null, 2)} />
           </div>
         ) : (
           <div className="label mt-4">{scenario.status === 'failed' ? 'Not evaluated' : 'Solving · CP-SAT + Monte Carlo…'}</div>
@@ -158,6 +171,7 @@ export const ScenarioTree: React.FC<ScenarioTreeProps> = ({ scenarios, results, 
   const forks = scenarios.filter((s) => s.parent_id !== null);
   const baseResult = baseline ? results[baseline.id] : undefined;
   const focusId = hoverId ?? null;
+  const bestId = pickBestFork(Object.values(results).filter((r) => scenarios.some((sc) => sc.id === r.scenario_id)))?.scenario_id;
 
   return (
     <div className="space-y-4" data-tour="tree">
@@ -186,6 +200,7 @@ export const ScenarioTree: React.FC<ScenarioTreeProps> = ({ scenarios, results, 
               onSelect={() => onSelect(s.id)}
               onHover={(on) => onHover?.(on ? s.id : null)}
               index={i + 1}
+              recommended={!!results[s.id] && s.id === bestId}
             />
           </div>
         ))}

@@ -427,13 +427,35 @@ def get_decision_comparison(decision_id: str, db: Session = Depends(get_db), use
         if raw:
             raw_results[sc["id"]] = raw
 
+    results = {sid: to_api_result(raw) for sid, raw in raw_results.items()}
     return {
         "decision_id": decision_id,
         "decision_spec": decision,
         "scenarios": scenarios,
-        "results": {sid: to_api_result(raw) for sid, raw in raw_results.items()},
+        "results": results,
         "explanation": call_explain(decision, raw_results),
+        "answer": _affordability_answer(decision, results),
     }
+
+
+def _affordability_answer(decision: Dict[str, Any], results: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Most you can spend without breaking the floor, and when (one-time decisions only)."""
+    from engine.answers import affordability
+
+    if decision.get("decision_kind") not in (None, "one_time"):
+        return None
+    base = next((r for r in results.values() if r.get("branch_type") == "baseline"), None)
+    if not base:
+        return None
+    try:
+        return affordability(
+            base["simulation"]["monthly_balances"],
+            (base.get("cash_flow") or {}).get("months") or [],
+            float(base["metrics"]["emergency_floor"]),
+            float(((decision.get("change") or {}).get("params") or {}).get("total_cost") or 0.0),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 # ---------------------------------------------------------------------------

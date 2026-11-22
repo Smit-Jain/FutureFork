@@ -128,3 +128,20 @@ class CacheModel(Base):
     cache_key  = Column(String(255), primary_key=True, index=True)
     result     = Column(JSON, nullable=False)
     created_at = Column(DateTime, default=utcnow)
+
+
+# ---------------------------------------------------------------------------
+# ITR helper: one saved tax profile (inputs + last computed report) per row
+# ---------------------------------------------------------------------------
+
+class TaxProfileModel(Base):
+    __tablename__ = "tax_profiles"
+
+    id          = Column(String(64), primary_key=True)
+    user_id     = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    fy          = Column(String(10), nullable=False)
+    label       = Column(String(120), nullable=False)
+    inputs      = Column(JSON, nullable=False)
+    report      = Column(JSON, nullable=True)
+    created_at  = Column(DateTime, default=utcnow)
+    updated_at  = Column(DateTime, default=utcnow, onupdate=utcnow, index=True)

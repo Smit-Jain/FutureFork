@@ -103,6 +103,24 @@ Anything FutureFork had to assume is shown under **About your data** before you 
 
 ---
 
+## 🧾 ITR Helper (Income Tax Return)
+
+A second tool at `/app/tax` helps Indian residents prepare their income-tax return for **FY 2025-26 (AY 2026-27)**, with FY 2026-27 available for planning.
+
+- **Who**: salaried people (ITR-1 / ITR-2) and presumptive freelancers or small businesses (ITR-4, sections 44ADA / 44AD).
+- **What you get**:
+  - the old and new regimes computed side by side, with the line-by-line working
+  - a one-line verdict and whether you get a refund or still owe tax
+  - the right ITR form, with the reasons
+  - tax-saving moves for next year, each recomputed by the engine
+  - a step-by-step guide for the e-filing portal, listing the value for each field with copy buttons and a JSON summary download
+- **Rules**: `engine/tax/rules.py` holds one frozen table per year and cites its sources. The calculation covers the slabs, the ₹75k / ₹50k standard deduction, the 87A rebate with marginal relief, surcharge with marginal relief, 4% cess, HRA, Chapter VI-A deductions, 111A / 112A equity gains, presumptive income, TDS and advance tax, the 234F late fee, and due dates.
+- **Belated returns**: after the due date the old regime is no longer available (section 115BAC(6)), and the verdict says so.
+- **Golden Rule**: the AI only writes the plain-English summary, and the Numeric Guard checks every ₹ and % against the tax engine's report.
+- **Not covered**: FutureFork doesn't file the return (that needs ERI registration with the Income Tax Department) and doesn't prepare ITR-3. Treat the result as guidance and check it against your AIS / Form 26AS.
+
+---
+
 ## 🏗️ System Architecture
 
 ```

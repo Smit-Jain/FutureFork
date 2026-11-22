@@ -54,6 +54,8 @@ engine/     Pure Python: model.py, changes.py (fork transformers, decision adjus
             solver.py (CP-SAT), simulator.py (Monte Carlo), metrics.py
 data/       normalize.py (read any CSV/Excel, detect columns), ingestor.py (12-month baseline),
             samples/ (bundled sample CSVs)
+engine/tax/ Indian income-tax engine for the ITR helper (rules per FY, compute, forms,
+            saving moves, filing checklist). Pure; build_tax_report() is the entry point.
 contracts/  schemas.py (source of truth, enforced as FastAPI response models),
             types.ts (TS mirror), openapi.json (generated)
 ```
@@ -65,6 +67,8 @@ contracts/  schemas.py (source of truth, enforced as FastAPI response models),
 **Database:** schema changes go in a new Alembic revision (`backend/db/migrations/versions`), never by editing old ones; `init_db()` runs `upgrade head`. Write timestamps with `models.utcnow`.
 
 **Request flow:** `POST /datasets/inspect` → `POST /datasets/commit` (12-month Node 0 baseline) → `POST /decisions` (parse) → `POST /decisions/{id}/scenarios` (fan-out) → `POST /decisions/{id}/run` (background solve + Monte Carlo) → `GET /runs/{id}` → `GET /decisions/{id}/compare`. The Crisis Playground calls `POST /decisions/{id}/stress`, which re-runs the Monte Carlo simulation with user shocks (engine numbers, not a browser estimate).
+
+**ITR helper:** `/app/tax` (`pages/TaxWorkspace.tsx`) → `backend/api/tax_routes.py` (`/tax/*`) → `call_tax_report` → `engine.tax.build_tax_report` + `ai/agents/tax_explainer.py` (guarded). Tax rules live in `engine/tax/rules.py`: add a new FY entry each Budget, never edit an old year, and cite the source. Tests in `engine/tests/test_tax.py` hold hand-worked figures; keep them exact.
 
 ## Decision kinds and forks
 

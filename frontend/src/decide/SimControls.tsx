@@ -10,7 +10,6 @@ export const STRESS_PRESETS: Record<StressMode, { label: string; hint: string; i
   crisis: { label: 'Crisis −15%', hint: 'Income 15% lower every month', inflowDelay: 0, spendPct: 0, incomePct: -15 },
 };
 
-const HORIZONS = ['3M', '6M', '12M', '24M'] as const;
 
 interface Segment<T extends string> {
   value: T;
@@ -67,27 +66,16 @@ interface SimControlsProps {
 export const SimControls: React.FC<SimControlsProps> = ({ stressMode, onStressMode, floor, floorMax, onFloor }) => {
   const step = Math.max(1000, floorMax / 50);
   return (
-    <div className="flex flex-wrap items-end gap-x-6 gap-y-4 border-y border-ink-line py-4">
+    <div className="flex flex-wrap items-end gap-x-6 gap-y-4 pt-3">
       <Segmented
-        label="Horizon"
-        value="12M"
-        onChange={() => undefined}
-        options={HORIZONS.map((h) => ({
-          value: h,
-          label: h,
-          disabled: h !== '12M',
-          title: h === '12M' ? '12-month horizon' : 'The engine models a 12-month horizon today',
-        }))}
-      />
-      <Segmented
-        label={`Stress · ${STRESS_PRESETS[stressMode].hint}`}
+        label={`If things go wrong · ${STRESS_PRESETS[stressMode].hint}`}
         value={stressMode}
         onChange={onStressMode}
         options={(Object.keys(STRESS_PRESETS) as StressMode[]).map((m) => ({ value: m, label: STRESS_PRESETS[m].label, title: STRESS_PRESETS[m].hint }))}
       />
       <label className="flex-1 min-w-[200px] space-y-1.5 block">
         <span className="flex justify-between label text-[10px]">
-          <span>Reserve floor</span>
+          <span>Always keep at least</span>
           <span className="text-ink font-mono tabular-nums">{formatAmount(floor)}</span>
         </span>
         <input

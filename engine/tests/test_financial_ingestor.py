@@ -123,7 +123,7 @@ def test_compile_startup_pnl():
 
     # Check runway calculation in summary
     assert "runway_months" in instance.summary
-    assert instance.summary["starting_balance"] == 6000000.0
+    assert instance.summary["starting_balance"] == 12000000.0
 
 
 def test_compilation_latency_sla_under_200ms():

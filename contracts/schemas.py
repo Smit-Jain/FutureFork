@@ -138,6 +138,9 @@ class ComparisonResponse(BaseModel):
     scenarios: List[Scenario]
     results: Dict[str, FinancialScenarioResult]
     explanation: Explanation
+    answer: Optional[Dict[str, Any]] = Field(
+        None, description="Max safe amount, best month and shortfall for one-time decisions (engine/answers.py)"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +207,241 @@ class HistoryItem(BaseModel):
 
 class HistoryResponse(BaseModel):
     items: List[HistoryItem]
+
+
+# ---------------------------------------------------------------------------
+# ITR helper (engine/tax). Every amount is computed by the tax engine.
+# ---------------------------------------------------------------------------
+
+TaxpayerType = Literal["salaried", "freelancer", "business"]
+AgeBand = Literal["below_60", "60_to_80", "above_80"]
+Regime = Literal["new", "old"]
+
+
+class TaxInputsModel(BaseModel):
+    """What the taxpayer tells us. Annual rupees; all optional except the basics."""
+
+    fy: str = "2025-26"
+    taxpayer_type: TaxpayerType = "salaried"
+    age_band: AgeBand = "below_60"
+    resident: bool = True
+    basic_da: float = Field(0, ge=0)
+    hra_received: float = Field(0, ge=0)
+    other_salary: float = Field(0, ge=0)
+    employer_nps: float = Field(0, ge=0)
+    professional_tax: float = Field(0, ge=0)
+    rent_paid: float = Field(0, ge=0)
+    metro_city: bool = False
+    gross_receipts: float = Field(0, ge=0)
+    digital_receipts: float = Field(0, ge=0)
+    declared_profit: float = Field(0, ge=0)
+    home_loan_interest: float = Field(0, ge=0)
+    let_out_rent: float = Field(0, ge=0)
+    let_out_municipal_tax: float = Field(0, ge=0)
+    let_out_loan_interest: float = Field(0, ge=0)
+    savings_interest: float = Field(0, ge=0)
+    deposit_interest: float = Field(0, ge=0)
+    dividends: float = Field(0, ge=0)
+    other_income: float = Field(0, ge=0)
+    stcg_111a: float = Field(0, ge=0)
+    ltcg_112a: float = Field(0, ge=0)
+    d_80c: float = Field(0, ge=0)
+    d_80ccd1b: float = Field(0, ge=0)
+    d_80d_self: float = Field(0, ge=0)
+    d_80d_parents: float = Field(0, ge=0)
+    parents_senior: bool = False
+    d_80e: float = Field(0, ge=0)
+    tds: float = Field(0, ge=0)
+    tcs: float = Field(0, ge=0)
+    advance_tax: float = Field(0, ge=0)
+
+
+class TaxLine(BaseModel):
+    key: str
+    label: str
+    amount: float
+    kind: str = Field(..., description="income | exemption | deduction | subtotal | tax | relief | total | paid | result | info")
+    section: str = ""
+
+
+class TaxPresumptive(BaseModel):
+    section: Optional[str] = None
+    income: float
+    within_limit: bool
+    limit: float
+
+
+class TaxBreakdown(BaseModel):
+    regime: Regime
+    gross_total_income: float
+    total_deductions: float
+    taxable_income: float
+    slab_tax: float
+    special_rate_tax: float
+    rebate: float
+    surcharge: float
+    cess: float
+    total_tax: float
+    taxes_paid: float
+    payable: float
+    refund: float
+    effective_rate_pct: float
+    heads: Dict[str, float]
+    exemptions: Dict[str, float]
+    deductions: Dict[str, float]
+    presumptive: TaxPresumptive
+    lines: List[TaxLine]
+    notes: List[str]
+
+
+class FilingWindow(BaseModel):
+    status: Literal["planning", "on_time", "belated", "closed"]
+    section: Optional[str] = None
+    due_date: str
+    belated_until: str
+    old_regime_allowed: bool
+    message: str
+
+
+class ItrFormChoice(BaseModel):
+    form: Literal["ITR-1", "ITR-2", "ITR-3", "ITR-4"]
+    name: str
+    supported: bool
+    reasons: List[str]
+
+
+class TaxVerdict(BaseModel):
+    headline: str
+    subline: str
+    result: str
+    outcome: Literal["refund", "payable", "settled"]
+    outcome_amount: float
+    regime: Regime
+    saving_vs_other: float
+
+
+class TaxMove(BaseModel):
+    key: str
+    title: str
+    detail: str
+    extra_outlay: float
+    tax_before: float
+    tax_after: float
+    saving: float
+    regime_after: Regime
+    benefit: bool
+    locks_money: bool
+
+
+class TaxSavings(BaseModel):
+    fy: str = Field(..., description="Year the moves are evaluated for (the next planning year)")
+    baseline_tax: float
+    baseline_regime: Regime
+    moves: List[TaxMove]
+
+
+class ChecklistField(BaseModel):
+    label: str
+    value: float
+    where: str = Field(..., description="Where it goes on the e-filing portal")
+
+
+class ChecklistStep(BaseModel):
+    n: int
+    title: str
+    detail: str
+    fields: List[ChecklistField]
+
+
+class FilingChecklist(BaseModel):
+    form: str
+    regime: Regime
+    steps: List[ChecklistStep]
+    documents: List[str]
+
+
+class TaxExplanation(BaseModel):
+    text: str
+    source: Literal["llm", "template"]
+    guard_passed: bool
+
+
+class TaxReport(BaseModel):
+    fy: str
+    ay: str
+    rules_status: Literal["filing", "planning"]
+    as_of: str
+    inputs: TaxInputsModel
+    new: TaxBreakdown
+    old: TaxBreakdown
+    cheaper: Regime
+    recommended: Regime
+    regime_saving: float
+    window: FilingWindow
+    late_fee: float
+    form: ItrFormChoice
+    verdict: TaxVerdict
+    savings: TaxSavings
+    checklist: FilingChecklist
+    explanation: Optional[TaxExplanation] = None
+
+
+class TaxProfile(BaseModel):
+    id: str
+    label: str
+    fy: str
+    inputs: TaxInputsModel
+    report: Optional[TaxReport] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class TaxProfileSummary(BaseModel):
+    id: str
+    label: str
+    fy: str
+    taxpayer_type: TaxpayerType
+    headline: Optional[str] = None
+    form: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class TaxProfileList(BaseModel):
+    items: List[TaxProfileSummary]
+
+
+class TaxProfileSave(BaseModel):
+    label: Optional[str] = Field(None, max_length=120)
+    inputs: TaxInputsModel
+
+
+class TaxYearInfo(BaseModel):
+    fy: str
+    ay: str
+    status: Literal["filing", "planning"]
+    standard_deduction_new: float
+    standard_deduction_old: float
+    rebate_limit_new: float
+    cap_80c: float
+    cap_80ccd1b: float
+    cap_80d_self: float
+    cap_80d_self_senior: float
+    cap_80d_parents: float
+    cap_80d_parents_senior: float
+    cap_24b: float
+    ltcg_112a_exempt: float
+    limit_44ada: float
+    limit_44ada_digital: float
+    limit_44ad: float
+    limit_44ad_digital: float
+    due_date_salaried: str
+    due_date_business: str
+    belated_until: str
+
+
+class TaxRulesResponse(BaseModel):
+    default_fy: str
+    years: List[TaxYearInfo]
 
 
 class ApiError(BaseModel):

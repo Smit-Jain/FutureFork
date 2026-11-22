@@ -29,11 +29,11 @@ def test_fresh_database_upgrades_to_head(tmp_path):
     _upgrade(engine)
     insp = sa.inspect(engine)
     tables = set(insp.get_table_names())
-    assert {"users", "uploads", "datasets", "decisions", "scenarios", "runs", "results", "cache", "alembic_version"} <= tables
+    assert {"users", "uploads", "datasets", "decisions", "scenarios", "runs", "results", "cache", "tax_profiles", "alembic_version"} <= tables
     for t in ("uploads", "datasets", "decisions"):
         assert "user_id" in {c["name"] for c in insp.get_columns(t)}
     with engine.connect() as c:
-        assert c.execute(sa.text("select version_num from alembic_version")).scalar() == "0002"
+        assert c.execute(sa.text("select version_num from alembic_version")).scalar() == "0003"
     _upgrade(engine)  # running again is a no-op
 
 

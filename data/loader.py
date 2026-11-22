@@ -111,7 +111,7 @@ def load_sample_instance(
                 category_col="Account_Head",
                 description_col="Narration",
                 date_format="%d/%m/%Y",
-                starting_balance=2500000.0 if starting_balance is None else starting_balance,
+                starting_balance=12000000.0 if starting_balance is None else starting_balance,
             )
         elif "personal" in dataset_id:
             mapping = ColumnMapping(
@@ -130,7 +130,7 @@ def load_sample_instance(
                 description_col="Description",
                 type_col="Type",
                 date_format="%Y-%m-%d",
-                starting_balance=6000000.0 if starting_balance is None else starting_balance,
+                starting_balance=12000000.0 if starting_balance is None else starting_balance,
             )
 
     return FinancialIngestor.compile(

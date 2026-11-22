@@ -273,7 +273,7 @@ def _build_allowed_facts(
 # greedily consumes "₹1.2L" as a whole token rather than stopping at "₹1.2".
 _MONEY_RE = re.compile(
     r"""
-    ₹\s*[\d,]+(?:\.\d+)?\s*(?:L(?:akh)?s?|Cr(?:ore)?s?|K)  # ₹ with explicit suffix (e.g. ₹60L, ₹1.2L)
+    ₹\s*[\d,]+(?:\.\d+)?\s*(?:L(?:akh)?s?|Cr(?:ore)?s?|K)(?![a-z])  # ₹ with a suffix (₹60L, ₹1.2 lakh), not "₹5,000 late"
     |
     ₹\s*[\d,]+(?:\.\d+)?(?:,\d+)*                            # ₹ Indian-grouped number, no suffix
     """,
@@ -604,7 +604,11 @@ Explain the competing options for the user's decision clearly and factually, and
 IMPORTANT: Use ONLY the numeric values provided in the data below. Do not invent or approximate numbers.
 Write every amount in Indian rupees with the ₹ symbol (e.g. ₹1,99,867 or -₹5,61,558), never $ or another currency.
 Refer to options by their display titles, not internal ids like "phase_in".
-Write in professional plain English. Keep it under 400 words.
+Write for someone with no finance background: short sentences, no jargon.
+Describe risk as "dips below the cushion in X% of scenarios" using pct_of_scenarios_below_cushion. Never mention a "survival score" or "cash-out risk".
+Round rupee amounts to whole rupees (no paise) and use Indian digit grouping (₹84,75,438).
+Recommend exactly the option named as recommended in the data; the do-nothing baseline is only a reference. Start with the recommendation in one sentence,
+then one short line per option. Keep it under 180 words.
 Return a JSON object: {"explanation": "<your text>"}."""
 
 
@@ -647,20 +651,34 @@ def _llm_explain(
                 return data
 
         summary_data: Dict[str, Any] = {}
+        rank_keys: Dict[str, Any] = {}
         for fid, result in branch_results.items():
             metrics = {}
             if hasattr(result, "metrics"):
                 metrics = result.metrics or {}
             elif isinstance(result, dict):
                 metrics = result.get("metrics") or {}
+            rank_keys[fid] = (
+                metrics.get("months_below_floor", 0),
+                -metrics.get("survival_score_pct", 0.0),
+                metrics.get("total_financing_interest", 0.0),
+            )
             summary_data[fid] = {
-                "survival_score_pct": metrics.get("survival_score_pct", 0.0),
-                "cash_out_risk_pct": metrics.get("cash_out_risk_pct", 0.0),
+                "months_below_floor": metrics.get("months_below_floor", 0),
+                # Same number the UI shows ("stays safe" = 100 − this)
+                "pct_of_scenarios_below_cushion": metrics.get("floor_breach_risk_pct", 0.0),
                 "lowest_balance": metrics.get("lowest_balance", 0.0),
                 "total_financing_interest": metrics.get("total_financing_interest", 0.0),
             }
 
+        # The engine's pick (same ranking as the UI): never the do-nothing baseline when forks exist
+        ranked = sorted(
+            [k for k in summary_data if "baseline" not in str(k)] or list(summary_data),
+            key=lambda k: rank_keys[k],
+        )
+        recommended = ranked[0] if ranked else ""
         prompt = (
+            f"Recommended option (chosen by the engine; recommend exactly this one): {recommended}\n"
             f"Decision: {getattr(decision, 'raw_prompt', '')}\n"
             f"Understood as: {getattr(decision, 'understood', '')}\n"
             f"Item: {getattr(decision, 'item_label', '')}, "
