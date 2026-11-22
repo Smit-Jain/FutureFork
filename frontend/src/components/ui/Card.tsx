@@ -14,13 +14,13 @@ export const Card: React.FC<CardProps> = ({
   className,
   ...props
 }) => {
-  const baseStyles = 'bg-white rounded-xl transition-all duration-200';
+  const baseStyles = 'bg-paper-2 transition-all duration-200';
   
   const variantStyles = {
-    default: 'border border-slate-200/80 shadow-soft hover:shadow-card',
-    flat: 'border border-slate-100 bg-slate-50/50',
-    outline: 'border border-slate-300 shadow-none',
-    interactive: 'border border-slate-200/80 shadow-soft hover:shadow-md hover:border-slate-300 cursor-pointer',
+    default: 'border border-ink-line shadow-paper',
+    flat: 'border border-ink-line',
+    outline: 'border border-ink',
+    interactive: 'border border-ink-line shadow-paper hover:shadow-lift hover:border-ink cursor-pointer',
   };
 
   return (

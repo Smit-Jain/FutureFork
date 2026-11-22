@@ -17,6 +17,19 @@ services:
         sync: false
       - key: OPENAI_API_KEY
         sync: false
+      # Postgres connection string (postgresql+psycopg2://...)
+      - key: DATABASE_URL
+        sync: false
+      # Google Sign-In client ID and the session-cookie signing secret (both required in production)
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      # Frontend on another domain: cross-site cookie
+      - key: COOKIE_SAMESITE
+        value: none
+      - key: COOKIE_SECURE
+        value: 1
       - key: NUM_SIMULATION_RUNS
         value: 300
       - key: RANDOM_SEED

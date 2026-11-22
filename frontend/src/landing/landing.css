@@ -1,0 +1,829 @@
+/* FutureFork landing: light editorial grid with a fixed three.js robot behind the content. */
+
+.ff-landing {
+  --col: 17%;
+  --bg: #efece6;
+  --ink: #141414;
+  --dim: rgba(20, 20, 20, 0.5);
+  --line: rgba(20, 20, 20, 0.09);
+  --brand: conic-gradient(from 200deg, #ffb347, #ff8a3d 18%, #ff5a5f 34%, #ff3d8b 50%, #ff5a5f 66%, #ff8a3d 82%, #ffb347);
+  --brand-lin: linear-gradient(90deg, #ff8a3d, #ff5a5f 50%, #ff3d8b);
+  --brand-lin-amber: linear-gradient(90deg, #ffb347, #ff8a3d 40%, #ff5a5f 70%, #ff3d8b);
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --mono: 'IBM Plex Mono', ui-monospace, monospace;
+  --sans: 'Schibsted Grotesk Variable', 'Schibsted Grotesk', system-ui, sans-serif;
+
+  position: relative;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  overflow-x: clip;
+}
+
+.ff-landing a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.ff-mono {
+  font-family: var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* ── Fixed layers ─────────────────────────────────────────────────────────── */
+
+.ff-guides {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+.ff-guides span {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--line);
+}
+.ff-guides span:nth-child(1) { left: var(--col); }
+.ff-guides span:nth-child(2) { left: 50%; }
+.ff-guides span:nth-child(3) { left: calc(100% - var(--col)); }
+
+.ff-canvas-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+.ff-canvas-wrap canvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+}
+.ff-robot-fallback {
+  position: absolute;
+  left: 50%;
+  bottom: 6vh;
+  width: min(34vw, 420px);
+  transform: translateX(-50%);
+  opacity: 0.95;
+}
+
+.ff-content {
+  position: relative;
+  z-index: 2;
+}
+
+/* ── Top bar (slim, light) ──────────────────────────────────────────────────── */
+
+.ff-topbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 24px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: #e6e2da;
+  color: rgba(20, 20, 20, 0.72);
+  border-bottom: 1px solid var(--line);
+  font: 400 10px/1 var(--mono);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  transition: transform 0.5s cubic-bezier(0.6, 0, 0.2, 1);
+}
+.ff-topbar b {
+  font-weight: 500;
+  color: var(--ink);
+  background: var(--brand-lin);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.ff-topbar a:hover { color: var(--ink); }
+.ff-topbar.is-hidden { transform: translateY(-100%); }
+.ff-topbar-x {
+  position: absolute;
+  right: 12px;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: 400 13px/1 var(--mono);
+  cursor: pointer;
+  padding: 4px;
+}
+
+/* ── Nav ──────────────────────────────────────────────────────────────────── */
+
+.ff-nav {
+  position: fixed;
+  top: 24px;
+  left: 0;
+  right: 0;
+  height: 52px;
+  z-index: 25;
+  display: grid;
+  grid-template-columns: 17% 1fr 17%;
+  align-items: stretch;
+  background: rgba(239, 236, 230, 0.86);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line);
+  transition: top 0.5s cubic-bezier(0.6, 0, 0.2, 1);
+}
+.ff-nav.is-top { top: 0; }
+.ff-nav > * {
+  display: flex;
+  align-items: center;
+}
+
+.ff-logo {
+  gap: 10px;
+  padding-left: 22px;
+  font: 500 18px/1 var(--sans);
+  letter-spacing: 0.01em;
+}
+.ff-logo svg { flex: none; }
+
+.ff-menu {
+  gap: 26px;
+  padding-left: 28px;
+  font: 400 11px/1 var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.ff-menu { gap: 34px; }
+.ff-menu a { opacity: 0.8; transition: opacity 0.2s; }
+.ff-menu a:hover { opacity: 1; }
+.ff-menu .ext { opacity: 0.5; }
+
+.ff-launch-cell {
+  justify-content: center;
+}
+.ff-launch {
+  position: relative;
+  height: 30px;
+  padding: 0 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--ink);
+  font: 500 11px/1 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: transparent;
+  transition: background 0.25s, color 0.25s;
+}
+.ff-launch::before {
+  /* gradient border along part of the top edge and down the left edge */
+  content: '';
+  position: absolute;
+  inset: -1px;
+  padding: 2px;
+  background: var(--brand);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  clip-path: polygon(0 0, 46% 0, 46% 2px, 2px 2px, 2px 100%, 0 100%);
+  pointer-events: none;
+}
+.ff-launch:hover { background: var(--ink); color: var(--bg); }
+.ff-launch-cell { gap: 14px; }
+.ff-signin {
+  font: 400 11px/1 var(--mono);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+.ff-signin:hover { opacity: 1; text-decoration: underline; }
+.ff-account {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--ink);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font: 500 12px/1 var(--mono);
+  text-transform: uppercase;
+  background: #f6f4ef;
+}
+.ff-account img { width: 100%; height: 100%; object-fit: cover; }
+.ff-dots { letter-spacing: -0.1em; }
+
+/* ── Right rail (4 section ticks) ──────────────────────────────────────────── */
+
+.ff-rail {
+  position: fixed;
+  right: 22px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 14px;
+}
+.ff-rail-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: none;
+  border: 0;
+  padding: 4px 0;
+  cursor: pointer;
+  color: var(--ink);
+}
+.ff-rail-tick {
+  width: 14px;
+  height: 1px;
+  background: rgba(20, 20, 20, 0.3);
+  transition: width 0.5s var(--ease), background 0.5s var(--ease);
+}
+.ff-rail-label {
+  font: 400 10px/1 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0;
+  transform: translateX(6px);
+  transition: opacity 0.5s var(--ease), transform 0.5s var(--ease);
+  pointer-events: none;
+}
+.ff-rail-item:hover .ff-rail-label,
+.ff-rail-item:focus-visible .ff-rail-label { opacity: 0.55; transform: none; }
+.ff-rail-item.is-active .ff-rail-tick { width: 28px; background: var(--ink); }
+.ff-rail-item.is-active .ff-rail-label { opacity: 1; transform: none; }
+
+/* ── Sections ─────────────────────────────────────────────────────────────── */
+
+.ff-section {
+  position: relative;
+  height: 100vh;
+  min-height: 620px;
+}
+
+.rv {
+  opacity: 0;
+  transform: translateY(26px);
+  transition: opacity 1s var(--ease), transform 1s var(--ease);
+}
+.ff-section.is-in .rv { opacity: 1; transform: none; }
+.ff-section.is-in .rv.d1 { transition-delay: 0.1s; }
+.ff-section.is-in .rv.d2 { transition-delay: 0.2s; }
+.ff-section.is-in .rv.d3 { transition-delay: 0.3s; }
+.ff-section.is-in .rv.d4 { transition-delay: 0.4s; }
+
+/* Brackets (7px) just outside a box */
+.ff-brk {
+  position: relative;
+}
+.ff-brk > .b {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border-color: var(--ink);
+  pointer-events: none;
+}
+.ff-brk > .b.tl { top: -5px; left: -5px; border-top: 1px solid; border-left: 1px solid; border-top-left-radius: 2px; }
+.ff-brk > .b.tr { top: -5px; right: -5px; border-top: 1px solid; border-right: 1px solid; border-top-right-radius: 2px; }
+.ff-brk > .b.bl { bottom: -5px; left: -5px; border-bottom: 1px solid; border-left: 1px solid; border-bottom-left-radius: 2px; }
+.ff-brk > .b.br { bottom: -5px; right: -5px; border-bottom: 1px solid; border-right: 1px solid; border-bottom-right-radius: 2px; }
+
+/* ── Intro hero ─────────────────────────────────────────────────────────────
+   One stack on the bottom-left (prompt pill → headline → subtitle → CTA). The robot is framed
+   right of centre (RobotScene INTRO.camX) so this column never touches it. */
+
+.ff-hero {
+  position: absolute;
+  left: var(--col);
+  bottom: 10vh;
+  width: min(28vw, 520px);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.ff-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: max-content;
+  height: 32px;
+  padding: 0 14px 0 0;
+  border: 1px solid var(--ink);
+  border-radius: 999px;
+  background: rgba(239, 236, 230, 0.9);
+  font: 400 clamp(9.5px, 0.78vw, 10.5px) / 1 var(--mono);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  margin-bottom: 26px;
+}
+.ff-pill-q {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  margin: -1px 0 -1px -1px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-top: 9px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--bg);
+  font: 700 22px/1 Georgia, 'Times New Roman', serif;
+}
+.ff-pill-text {
+  overflow: hidden;
+  text-overflow: clip;
+}
+.ff-caret {
+  flex: none;
+  display: inline-block;
+  width: 6px;
+  height: 11px;
+  background: var(--ink);
+  animation: ff-blink 1s steps(1) infinite;
+}
+@keyframes ff-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+.ff-hero-title {
+  margin: 0;
+}
+.ff-hbox {
+  position: relative;
+  display: block;
+  width: max-content;
+  padding: 0.02em 0.22em 0.08em;
+  font: 400 clamp(42px, 5.25vw, 92px) / 1.02 var(--sans);
+  letter-spacing: -0.025em;
+}
+.ff-hbox + .ff-hbox { margin-top: -2px; }
+.ff-hbox::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  padding: 2px;
+  background: var(--brand-lin);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+.ff-hbox.amber::before { background: var(--brand-lin-amber); }
+.ff-hbox.cut::before {
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 22px), calc(100% - 22px) 100%, 0 100%);
+}
+.ff-hbox.cut::after {
+  /* the 45° edge across the cut corner */
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 22px;
+  height: 22px;
+  background: linear-gradient(to top left, transparent calc(50% - 1.4px), #ff3d8b calc(50% - 1.4px),
+    #ff3d8b calc(50% + 1.4px), transparent calc(50% + 1.4px));
+  pointer-events: none;
+}
+
+.ff-hero-sub {
+  margin: 24px 0 0;
+  max-width: 34ch;
+  font: 400 15px/1.45 var(--sans);
+  color: rgba(20, 20, 20, 0.78);
+}
+
+.ff-cta {
+  position: relative;
+  margin-top: 24px;
+  height: 40px;
+  padding: 0 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--ink);
+  color: var(--bg) !important;
+  font: 500 11px/1 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  transition: background 0.25s;
+}
+.ff-cta::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 46%;
+  height: 2px;
+  background: var(--brand-lin);
+}
+.ff-cta:hover { background: #2b2a27; }
+
+.ff-scroll {
+  position: absolute;
+  right: 72px;
+  bottom: 10vh;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  font: 400 11px/1 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.ff-scroll .arrow { display: inline-block; animation: ff-bob 2s ease-in-out infinite; }
+@keyframes ff-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(4px); }
+}
+
+/* ── How it works ──────────────────────────────────────────────────────────
+   Copy on the left half; the robot is framed in the right third (RobotScene HOW pose). */
+
+.ff-how-inner {
+  position: absolute;
+  left: var(--col);
+  top: 50%;
+  transform: translateY(-46%);
+  width: min(38vw, 640px);
+}
+.ff-eyebrow {
+  display: block;
+  font-size: 11px;
+  color: var(--dim);
+  margin-bottom: 14px;
+}
+.ff-how-head h2 {
+  margin: 0 0 34px;
+  font: 400 clamp(30px, 3.05vw, 54px) / 1.08 var(--sans);
+  letter-spacing: -0.02em;
+}
+.ff-hbox-inline {
+  display: inline-block;
+  border: 1px solid var(--ink);
+  border-radius: 999px;
+  padding: 0 0.32em 0.04em;
+}
+.ff-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--ink);
+}
+.ff-steps li {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  gap: 8px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line);
+}
+.ff-step-n {
+  font: 400 11px/1.6 var(--mono);
+  letter-spacing: 0.06em;
+  color: var(--dim);
+}
+.ff-steps h3 {
+  margin: 0 0 4px;
+  font: 400 20px/1.2 var(--sans);
+  letter-spacing: -0.01em;
+}
+.ff-steps p {
+  margin: 0;
+  font: 400 14px/1.5 var(--sans);
+  color: rgba(20, 20, 20, 0.7);
+}
+.ff-caps {
+  list-style: none;
+  margin: 28px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+}
+.ff-caps li {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 2px solid transparent;
+  border-image: var(--brand-lin) 1;
+  font: 400 12.5px/1.45 var(--sans);
+  color: rgba(20, 20, 20, 0.7);
+}
+.ff-caps .ff-mono {
+  font-size: 10.5px;
+  color: var(--ink);
+}
+
+/* ── Forks (product) ──────────────────────────────────────────────────────── */
+
+.ff-tabs {
+  position: absolute;
+  top: 15%;
+  left: var(--col);
+  right: 0;
+  height: 74px;
+  overflow: hidden;
+}
+.ff-tabs-track {
+  display: flex;
+  height: 100%;
+  will-change: transform;
+}
+.ff-tabs-track.anim { transition: transform 0.9s cubic-bezier(0.65, 0, 0.2, 1); }
+.ff-tab {
+  flex: none;
+  width: 33vw;
+  height: 100%;
+  display: flex;
+  align-items: stretch;
+  padding: 6px 8px 6px 0;
+  color: rgba(20, 20, 20, 0.14);
+  transition: color 0.6s var(--ease), opacity 0.6s var(--ease);
+}
+.ff-tab-inner {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: stretch;
+  border: 1px solid transparent;
+  transition: border-color 0.6s var(--ease);
+}
+.ff-tab-num {
+  width: 68px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid currentColor;
+  font: 400 12px/1 var(--mono);
+  letter-spacing: 0.06em;
+}
+.ff-tab-label {
+  display: flex;
+  align-items: center;
+  padding: 0 18px;
+  font: 400 clamp(18px, 1.7vw, 28px) / 1.1 var(--sans);
+  letter-spacing: -0.01em;
+}
+.ff-tab.is-active { color: var(--ink); }
+.ff-tab.is-active .ff-tab-inner { border-color: var(--ink); background: rgba(239, 236, 230, 0.55); }
+.ff-tab.is-past { opacity: 0; }
+.ff-tab .b { display: none; }
+.ff-tab.is-active .b { display: block; }
+
+.ff-tab-desc {
+  position: absolute;
+  top: calc(15% + 92px);
+  left: var(--col);
+  width: 26%;
+  font: 400 11px/1.55 var(--mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--dim);
+  min-height: 52px;
+}
+.ff-tab-desc b { color: var(--ink); font-weight: 500; }
+
+.ff-gateway {
+  position: absolute;
+  left: var(--col);
+  bottom: 9%;
+  font: 400 clamp(30px, 3.05vw, 54px) / 1.08 var(--sans);
+  letter-spacing: -0.02em;
+}
+.ff-gateway .dots {
+  display: block;
+  font: 400 14px/1 var(--mono);
+  margin-bottom: 14px;
+  letter-spacing: 0.1em;
+}
+.ff-gateway .boxed {
+  display: inline-block;
+  border: 1px solid var(--ink);
+  border-radius: 999px;
+  padding: 0 0.32em 0.04em;
+  margin-left: -0.1em;
+}
+.ff-gateway .open {
+  margin-top: 22px;
+  display: inline-flex;
+  gap: 8px;
+  font: 500 11px/1 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--ink);
+  padding-bottom: 3px;
+}
+.ff-gateway .open:hover { color: #ff5a5f; border-color: #ff5a5f; }
+
+/* ── Cases (reviews layout) ───────────────────────────────────────────────── */
+
+.ff-case-head {
+  position: absolute;
+  top: 12%;
+  left: var(--col);
+  right: var(--col);
+  height: 60px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  border-bottom: 1px solid var(--line);
+}
+.ff-case-tag {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 400 11px/1 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.ff-case-tag .num {
+  padding: 3px 6px;
+}
+.ff-avatar {
+  width: 56px;
+  height: 56px;
+  flex: none;
+  border: 1px solid var(--ink);
+  overflow: hidden;
+  background: #e6e2da;
+}
+.ff-case-who {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: opacity 0.45s var(--ease), transform 0.45s var(--ease);
+}
+.ff-case-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 500 16px/1 var(--sans);
+}
+.ff-case-name::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--brand);
+}
+.ff-case-role {
+  font: 400 10.5px/1 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.ff-quote {
+  position: absolute;
+  left: var(--col);
+  top: 26%;
+  width: 23vw;
+  transition: opacity 0.45s var(--ease), transform 0.45s var(--ease);
+}
+.ff-quote p {
+  margin: 0;
+  font: 400 clamp(20px, 2.3vw, 40px) / 1.19 var(--sans);
+  letter-spacing: -0.015em;
+}
+.ff-quote .ff-try {
+  margin-top: 26px;
+  display: inline-block;
+  padding-left: 12px;
+  border-left: 1px solid var(--ink);
+  font: 400 11px/1.6 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.ff-quote .ff-try:hover { color: #ff5a5f; }
+.ff-swap-out { opacity: 0; transform: translateY(10px); }
+
+.ff-arrows {
+  position: absolute;
+  left: var(--col);
+  bottom: 9%;
+  display: flex;
+  gap: 10px;
+}
+.ff-arrows button {
+  width: 46px;
+  height: 46px;
+  border: 1px solid var(--ink);
+  background: rgba(239, 236, 230, 0.6);
+  font: 400 18px/1 var(--mono);
+  cursor: pointer;
+  color: var(--ink);
+  transition: background 0.2s, color 0.2s;
+}
+.ff-arrows button:hover { background: var(--ink); color: var(--bg); }
+.ff-case-count {
+  align-self: center;
+  margin-left: 8px;
+  font: 400 11px/1 var(--mono);
+  letter-spacing: 0.06em;
+}
+
+.ff-ghost {
+  /* a single faded teaser line of the next case */
+  position: absolute;
+  left: calc(100% - var(--col) + 22px);
+  right: 0;
+  top: 26%;
+  color: rgba(20, 20, 20, 0.1);
+  font: 400 clamp(20px, 2.3vw, 40px) / 1.19 var(--sans);
+  letter-spacing: -0.015em;
+  white-space: nowrap;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, #000 55%, transparent);
+  mask-image: linear-gradient(90deg, #000 55%, transparent);
+  pointer-events: none;
+}
+
+.ff-footer {
+  position: relative;
+  height: 30vh;
+  min-height: 200px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  font: 400 11px/1 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+}
+.ff-footer nav { display: flex; gap: 20px; color: var(--dim); }
+.ff-footer nav a:hover { color: var(--ink); }
+
+/* ── Mobile / narrow ───────────────────────────────────────────────────────── */
+
+@media (max-width: 1100px) {
+  .ff-hero { width: min(40vw, 520px); }
+  .ff-how-inner { width: min(46vw, 600px); }
+  .ff-caps { grid-template-columns: 1fr; gap: 12px; }
+}
+
+@media (max-width: 900px) {
+  .ff-guides span:nth-child(1),
+  .ff-guides span:nth-child(3),
+  .ff-menu,
+  .ff-rail,
+  .ff-ghost {
+    display: none;
+  }
+  .ff-nav { grid-template-columns: 1fr auto; }
+  .ff-logo { padding-left: 16px; }
+  .ff-launch-cell { padding-right: 16px; }
+  .ff-signin { display: none; }
+  .ff-topbar { padding: 0 30px; }
+  .ff-topbar .long { display: none; }
+
+  .ff-hero { left: 16px; right: 16px; width: auto; bottom: 6vh; }
+  .ff-pill { width: auto; max-width: 100%; font-size: 10px; }
+  .ff-hbox { font-size: clamp(38px, 11vw, 60px); }
+  .ff-scroll { display: none; }
+
+  .ff-how { height: auto; min-height: 100vh; padding: 96px 16px 48px; }
+  .ff-how-inner { position: static; width: auto; transform: none; }
+
+  .ff-tabs { left: 16px; }
+  .ff-tab { width: 78vw; }
+  .ff-tab-desc { left: 16px; right: 16px; width: auto; }
+  .ff-gateway { left: 16px; right: 16px; }
+
+  .ff-case-head { left: 16px; right: 16px; gap: 12px; }
+  .ff-quote { left: 16px; right: 16px; width: auto; top: 28%; }
+  .ff-arrows { left: 16px; }
+
+  /* paper backing so text stays readable over the robot */
+  .ff-hbox,
+  .ff-hero-sub,
+  .ff-how-inner,
+  .ff-gateway .line,
+  .ff-quote p,
+  .ff-quote .ff-try,
+  .ff-tab-desc {
+    background: rgba(239, 236, 230, 0.88);
+  }
+  .ff-hero-sub { padding: 4px 6px; }
+  .ff-how-inner { padding: 14px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rv { opacity: 1; transform: none; transition: none; }
+  .ff-scroll .arrow,
+  .ff-caret { animation: none; }
+  .ff-rail-tick, .ff-rail-label { transition: none; }
+  .ff-tabs-track.anim { transition: none; }
+}

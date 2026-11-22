@@ -48,3 +48,11 @@
 - **Context**: Real exports vary widely (delimiters, bank preambles, Dr/Cr markers, Indian and European number formats, short histories), and real decisions are not all one-time purchases.
 - **Decision**: One shared reader (`data/normalize.py`) detects columns from headers and values for both inspect and commit. Decisions are classified as `one_time`, `recurring_expense` or `income_change`, each with its own forks (`engine.changes.FORKS_BY_KIND`); recurring costs and income changes are applied to a copy of the baseline and solved with the same engine. The parser always returns a plain-English "understood" summary, asks a specific question when an amount is missing, and declines off-topic prompts.
 - **Consequence**: Assumptions (inferred opening balance, projected months, skipped rows, currency) are surfaced to the user as warnings instead of being hidden. Short histories are projected from averages rather than zero-filled.
+
+## ADR 008: Google Sign-In Accounts, Per-User Data and Alembic Migrations
+- **Date**: 2026-11-22
+- **Status**: Accepted
+- **Context**: Users need accounts so their decisions can be saved and reopened. The team moved to PostgreSQL, where `create_all` can't add columns to existing tables.
+- **Decision**: Sign-in is required for `/app` and the API. The browser gets a Google ID token from Google Identity Services; the backend verifies it (`google-auth`, audience = `GOOGLE_CLIENT_ID`) and issues its own session as a signed HS256 JWT in an httpOnly, SameSite cookie. State-changing requests also need an `X-FutureFork: 1` header (CSRF). Datasets, uploads and decisions carry a `user_id`; the bundled samples are shared (`user_id` NULL); anything owned by someone else returns 404. The schema is managed by Alembic (`backend/db/migrations`), applied on startup; migrations are idempotent so pre-Alembic databases upgrade in place. Timestamps are written as UTC by the app.
+- **Consequence**: Every API client needs a session (`AUTH_DEV_LOGIN=1` gives local tools and tests a Google-free login; it's ignored in production). Production needs `GOOGLE_CLIENT_ID`, `SESSION_SECRET` and, for split frontend/API domains, `COOKIE_SAMESITE=none` with `COOKIE_SECURE=1`. Schema changes are new Alembic revisions, not table rebuilds.
+

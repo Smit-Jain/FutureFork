@@ -37,9 +37,9 @@ Beginner-friendly and intermediate issues across the engine, AI layer, backend a
 ---
 
 ### 5. 📤 Export the winning plan
-- **Area**: `frontend/src/components/ComparisonDashboard.tsx`
+- **Area**: `frontend/src/components/compare/CompareWorkbench.tsx`
 - **Difficulty**: Beginner
-- **Goal**: Export the selected fork's 12-month schedule (inflows, category outflows, purchase cash-out, closing balance) as CSV.
+- **Goal**: The CSV button exports the highest-survival fork's monthly inflows, cash-out and balances. Let users export the *selected* fork instead, including category outflows.
 - **Definition of Done**: The downloaded file matches `cash_flow` and `simulation.monthly_balances` exactly.
 
 ---
@@ -56,19 +56,11 @@ Beginner-friendly and intermediate issues across the engine, AI layer, backend a
 - **Area**: `data/ingestor.py`, `engine/`
 - **Difficulty**: Advanced
 - **Goal**: Support 24-month horizons (currently fixed at 12 months).
-- **Definition of Done**: Horizon is configurable end to end; all tests pass for 12 and 24.
+- **Definition of Done**: Horizon is configurable end to end; all tests pass for 12 and 24. The decision workbench already shows a `3M | 6M | 12M | 24M` toggle (`frontend/src/decide/SimControls.tsx`) with only 12M enabled; enable the others once the engine supports them.
 
 ---
 
-### 8. 🗄️ Database migrations
-- **Area**: `backend/db/`
-- **Difficulty**: Intermediate
-- **Goal**: Add Alembic so schema changes don't require deleting the local SQLite database.
-- **Definition of Done**: `alembic upgrade head` creates the current schema; CI runs it.
-
----
-
-### 9. 🔔 Webhook on run completion
+### 8. 🔔 Webhook on run completion
 - **Area**: `backend/orchestration/runner.py`, `backend/settings.py`
 - **Difficulty**: Beginner
 - **Goal**: Optional `WEBHOOK_URL` receives a JSON summary when a decision run finishes.

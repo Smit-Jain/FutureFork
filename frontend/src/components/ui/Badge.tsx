@@ -18,36 +18,36 @@ export const Badge: React.FC<BadgeProps> = ({
   dot = false,
 }) => {
   const sizeStyles = {
-    sm: 'text-xs px-2 py-0.5 font-medium',
-    md: 'text-xs px-2.5 py-1 font-semibold',
-    lg: 'text-sm px-3 py-1.5 font-semibold',
+    sm: 'text-[10px] px-1.5 py-0.5',
+    md: 'text-[11px] px-2 py-0.5',
+    lg: 'text-xs px-2.5 py-1',
   };
 
   const variantStyles = {
-    default: 'bg-slate-100 text-slate-700 border border-slate-200',
-    success: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
-    warning: 'bg-amber-50 text-amber-700 border border-amber-200',
-    danger: 'bg-rose-50 text-rose-700 border border-rose-200',
-    purple: 'bg-purple-50 text-purple-700 border border-purple-200',
-    info: 'bg-blue-50 text-blue-700 border border-blue-200',
-    neutral: 'bg-slate-200/60 text-slate-600 border border-slate-300',
+    default: 'bg-paper-2 text-ink border-ink',
+    success: 'bg-good/5 text-good border-good',
+    warning: 'bg-warn/5 text-warn border-warn',
+    danger: 'bg-bad/5 text-bad border-bad',
+    purple: 'bg-fork-phased/5 text-fork-phased border-fork-phased',
+    info: 'bg-fork-upfront/5 text-fork-upfront border-fork-upfront',
+    neutral: 'bg-paper text-ink-dim border-ink-faint',
   };
 
   const dotColors = {
-    default: 'bg-slate-500',
-    success: 'bg-emerald-500',
-    warning: 'bg-amber-500',
-    danger: 'bg-rose-500',
-    purple: 'bg-purple-500',
-    info: 'bg-blue-500',
-    neutral: 'bg-slate-400',
+    default: 'bg-ink',
+    success: 'bg-good',
+    warning: 'bg-warn',
+    danger: 'bg-bad',
+    purple: 'bg-fork-phased',
+    info: 'bg-fork-upfront',
+    neutral: 'bg-ink-dim',
   };
 
   return (
     <span
       className={twMerge(
         clsx(
-          'inline-flex items-center gap-1.5 rounded-full tracking-wide',
+          'inline-flex items-center gap-1.5 font-mono uppercase tracking-[0.05em] border',
           sizeStyles[size],
           variantStyles[variant],
           className

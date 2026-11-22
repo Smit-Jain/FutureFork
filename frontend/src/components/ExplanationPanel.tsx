@@ -1,194 +1,130 @@
 import React from 'react';
-import { Card } from './ui/Card';
-import { Badge } from './ui/Badge';
-import { Sparkles, CheckCircle2, Lightbulb, Compass } from 'lucide-react';
-import { BranchType, Explanation, FinancialScenarioResult } from '../contracts/types';
+import { CheckCircle2, ShieldCheck, ShieldAlert } from 'lucide-react';
+import { Explanation, FinancialScenarioResult } from '../contracts/types';
+import { FORK_COLORS, FORK_LABELS, riskTone, scoreTone } from '../theme/forks';
+import { Reveal } from './fx/Reveal';
 
-// ─── Utility: parse ₹, %, Month N patterns ──────────────────────────────────
+const TOKEN_RE = /(₹[\d,.]+(?:L|K|Cr)?|-₹[\d,.]+(?:L|K|Cr)?|[\d.]+\s?%|Month\s+\d+|\d+\s+months?)/gi;
 
-function parseExplanationPills(text: string, onHighlight?: (month: number) => void): React.ReactNode[] {
-  const parts: React.ReactNode[] = [];
-  // Pattern: ₹ amounts, percentages, Month references
-  const regex = /(₹[\d,.]+(L|K|Cr)?|[\d.]+%|Month\s+\d+|\d+\s+months?)/gi;
-  let lastIdx = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = regex.exec(text)) !== null) {
-    // Add text before match
-    if (match.index > lastIdx) {
-      parts.push(text.slice(lastIdx, match.index));
+/** Highlights engine numbers (₹, %, months) and renders **bold** from LLM output as plain emphasis. */
+function renderRich(text: string, onHighlight?: (month: number) => void): React.ReactNode[] {
+  const out: React.ReactNode[] = [];
+  text.split(/(\*\*[^*]+\*\*)/g).forEach((chunk, ci) => {
+    const bold = chunk.startsWith('**') && chunk.endsWith('**');
+    const body = bold ? chunk.slice(2, -2) : chunk;
+    let last = 0;
+    let m: RegExpExecArray | null;
+    const parts: React.ReactNode[] = [];
+    TOKEN_RE.lastIndex = 0;
+    while ((m = TOKEN_RE.exec(body)) !== null) {
+      if (m.index > last) parts.push(body.slice(last, m.index));
+      const token = m[0];
+      const monthNum = /^month/i.test(token) ? parseInt(token.replace(/\D/g, ''), 10) : null;
+      const cls = 'font-mono tabular-nums text-[0.92em] px-1 border-b border-ink/40';
+      parts.push(
+        monthNum !== null && onHighlight ? (
+          <button key={`${ci}-${m.index}`} className={`${cls} hover:bg-ink hover:text-paper`} onClick={() => onHighlight(monthNum)}>
+            {token}
+          </button>
+        ) : (
+          <span key={`${ci}-${m.index}`} className={cls}>
+            {token}
+          </span>
+        ),
+      );
+      last = m.index + token.length;
     }
-
-    const token = match[0];
-    const isRupee = token.startsWith('₹');
-    const isPercent = token.endsWith('%');
-    const isMonth = /month/i.test(token);
-
-    let pillClass = '';
-    if (isRupee) pillClass = 'metric-pill-emerald';
-    else if (isPercent) pillClass = 'metric-pill-amber';
-    else if (isMonth) pillClass = 'metric-pill-cyan';
-    else pillClass = 'metric-pill-cyan';
-
-    const monthNum = isMonth ? parseInt(token.replace(/\D/g, ''), 10) : null;
-
-    parts.push(
-      <button
-        key={`${match.index}-${token}`}
-        className={`${pillClass} cursor-pointer hover:opacity-80 active:scale-95 transition-all duration-100 inline-block mx-0.5`}
-        onClick={() => { if (monthNum !== null && onHighlight) onHighlight(monthNum); }}
-        title={monthNum !== null ? `Highlight Month ${monthNum}` : undefined}
-      >
-        {token}
-      </button>
-    );
-
-    lastIdx = match.index + token.length;
-  }
-
-  if (lastIdx < text.length) {
-    parts.push(text.slice(lastIdx));
-  }
-
-  return parts;
+    if (last < body.length) parts.push(body.slice(last));
+    out.push(bold ? <strong key={ci} className="font-medium">{parts}</strong> : <React.Fragment key={ci}>{parts}</React.Fragment>);
+  });
+  return out;
 }
-
-const POLICY_LABEL_MAP: Record<BranchType, string> = {
-  baseline: 'Baseline (Node 0)',
-  upfront:  'Upfront Purchase',
-  emi:      'EMI / Instalments',
-  phased:   'Phased Purchase',
-  trim:     'Trim Spending',
-  absorb:   'As Planned',
-  delay:    'Delay the Start',
-  phase_in: 'Phase It In',
-};
-
-const POLICY_COLOR_MAP: Record<BranchType, string> = {
-  baseline: 'border-emerald-500/30 bg-emerald-500/5',
-  upfront:  'border-cyan-500/30 bg-cyan-500/5',
-  emi:      'border-amber-500/30 bg-amber-500/5',
-  phased:   'border-purple-500/30 bg-purple-500/5',
-  trim:     'border-rose-500/30 bg-rose-500/5',
-  absorb:   'border-cyan-500/30 bg-cyan-500/5',
-  delay:    'border-amber-500/30 bg-amber-500/5',
-  phase_in: 'border-purple-500/30 bg-purple-500/5',
-};
-
-const SURVIVAL_COLOR = (pct: number) =>
-  pct >= 90 ? 'text-emerald-400' : pct >= 70 ? 'text-amber-400' : 'text-rose-400';
-
-// ─── Financial Explanation Panel ─────────────────────────────────────────────
 
 interface ExplanationPanelProps {
   explanation: Explanation | null;
   financialResults: FinancialScenarioResult[];
-  selectedFinancialId: string | null;
+  /** kept for API compatibility; the per-fork list moved to the fork cards and Compare table */
+  selectedFinancialId?: string | null;
   onHighlightMonth?: (month: number) => void;
 }
 
 export const ExplanationPanel: React.FC<ExplanationPanelProps> = ({
   explanation,
   financialResults,
-  selectedFinancialId,
   onHighlightMonth,
 }) => {
   if (financialResults.length === 0) return null;
-  const best = financialResults.reduce((a, b) =>
-    b.metrics.survival_score_pct > a.metrics.survival_score_pct ? b : a
-  );
+  // Rank the competing forks (not the do-nothing baseline) the way the server's explainer does:
+  // fewest months below the floor, then survival, then financing interest, then trims.
+  const forks = financialResults.filter((r) => r.branch_type !== 'baseline');
+  const pool = forks.length ? forks : financialResults;
+  const best = [...pool].sort(
+    (a, b) =>
+      a.metrics.months_below_floor - b.metrics.months_below_floor ||
+      b.metrics.survival_score_pct - a.metrics.survival_score_pct ||
+      a.metrics.total_financing_interest - b.metrics.total_financing_interest ||
+      a.metrics.total_trims_saved - b.metrics.total_trims_saved,
+  )[0];
+  const guardOk = !!explanation?.guard_passed;
 
   return (
-    <div className="glass-card p-6 space-y-6 animate-in fade-in">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-white/8 gap-2">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center">
-            <Sparkles className="w-4 h-4 text-amber-400" />
+    <div className="space-y-8" data-tour="explanation">
+      {/* Recommendation hero */}
+      <Reveal>
+        <div className="relative grad-border p-6 sm:p-8 bg-paper-2/60">
+          <div className="label">Recommended fork</div>
+          <div className="mt-2 text-3xl sm:text-5xl tracking-tight leading-[1.02]" style={{ color: FORK_COLORS[best.branch_type] }}>
+            {FORK_LABELS[best.branch_type]}
           </div>
-          <div>
-            <h3 className="text-base font-bold text-slate-200">AI Decision Synthesis</h3>
-            <p className="text-xs text-slate-500">Grounded strictly in CP-SAT solver + Monte Carlo simulation outputs</p>
+          <div className="mt-6 grid grid-cols-3 gap-4 max-w-xl border-t border-ink-line pt-4">
+            <div>
+              <div className="label">Survival</div>
+              <div className="font-mono text-2xl tabular-nums" style={{ color: scoreTone(best.metrics.survival_score_pct) }}>
+                {best.metrics.survival_score_pct}%
+              </div>
+            </div>
+            <div>
+              <div className="label">Cash-out risk</div>
+              <div className="font-mono text-2xl tabular-nums" style={{ color: riskTone(best.metrics.cash_out_risk_pct) }}>
+                {best.metrics.cash_out_risk_pct}%
+              </div>
+            </div>
+            <div>
+              <div className="label">Runway</div>
+              <div className="font-mono text-2xl tabular-nums">{best.metrics.runway_months}mo</div>
+            </div>
           </div>
+          <p className="mt-4 text-[12px] text-ink-dim flex items-center gap-1.5">
+            <CheckCircle2 className="w-3.5 h-3.5 text-good" />
+            Fewest months below the floor, then highest survival, then lowest cost · from CP-SAT and {best.simulation.n_runs} Monte Carlo runs.
+          </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Badge variant="purple" size="sm" dot>
-            {explanation?.source === 'llm' ? 'AI-written from computed results' : 'Template from computed results'}
-          </Badge>
-          <span className={`text-[10px] font-mono ${explanation?.guard_passed ? 'text-emerald-500' : 'text-rose-400'}`}>
-            Numeric Guard: {explanation?.guard_passed ? 'passed' : 'failed'}
-          </span>
-        </div>
-      </div>
+      </Reveal>
 
       {/* Guarded explanation */}
       {explanation?.summary && (
-        <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-line">
-          {parseExplanationPills(explanation.summary, onHighlightMonth)}
-        </p>
+        <Reveal step={1}>
+          <div className="grid grid-cols-1 lg:grid-cols-[200px_1fr] gap-4 lg:gap-8">
+            <div className="space-y-2">
+              <div className="label">{explanation.source === 'llm' ? 'Written by AI' : 'Written from template'}</div>
+              <div
+                className="inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.05em] border px-2 py-1"
+                style={{ color: guardOk ? '#2f7d4f' : '#d6345f', borderColor: guardOk ? '#2f7d4f' : '#d6345f' }}
+              >
+                {guardOk ? <ShieldCheck className="w-3.5 h-3.5" /> : <ShieldAlert className="w-3.5 h-3.5" />}
+                Numeric Guard {guardOk ? 'passed' : 'failed'}
+              </div>
+              <p className="text-[12px] text-ink-dim leading-snug">
+                Every ₹, % and month in this text was checked against the engine's results.
+              </p>
+            </div>
+            <p className="text-[15px] leading-relaxed whitespace-pre-line max-w-3xl">
+              {renderRich(explanation.summary, onHighlightMonth)}
+            </p>
+          </div>
+        </Reveal>
       )}
 
-      {/* Recommendation */}
-      <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-500/10 via-cyan-500/5 to-purple-500/10 border border-emerald-500/20 space-y-2">
-        <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm">
-          <Lightbulb className="w-4 h-4" />
-          Recommended Policy: <span className="text-white">{POLICY_LABEL_MAP[best.branch_type]}</span>
-        </div>
-        <div className="text-sm text-slate-300 leading-relaxed font-mono tabular-nums">
-          Survival score{' '}
-          <span className={`font-black ${SURVIVAL_COLOR(best.metrics.survival_score_pct)}`}>
-            {best.metrics.survival_score_pct}%
-          </span>
-          {' '}· Cash-out risk{' '}
-          <span className={`font-black ${SURVIVAL_COLOR(100 - best.metrics.cash_out_risk_pct)}`}>
-            {best.metrics.cash_out_risk_pct}%
-          </span>
-          {' '}· Runway{' '}
-          <span className="text-cyan-400 font-black">{best.metrics.runway_months} months</span>
-        </div>
-        <div className="text-[11px] text-slate-500 pt-1 flex items-center gap-1.5">
-          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-          <span>Highest survival score across forks; every figure comes from CP-SAT and {best.simulation.n_runs} Monte Carlo runs.</span>
-        </div>
-      </div>
-
-      {/* Per-scenario breakdown */}
-      <div className="space-y-3">
-        <h4 className="text-xs font-bold uppercase tracking-widest text-slate-500 flex items-center gap-2">
-          <Compass className="w-3.5 h-3.5 text-slate-500" />
-          Per-Fork Consequence Analysis
-        </h4>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {financialResults.map((r) => (
-            <div
-              key={r.scenario_id}
-              className={`p-4 rounded-xl border space-y-2 transition-all hover:shadow-glass ${
-                POLICY_COLOR_MAP[r.branch_type] ?? 'border-white/10 bg-white/3'
-              } ${r.scenario_id === selectedFinancialId ? 'ring-1 ring-inset ring-white/20' : ''}`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-200">{r.name ?? POLICY_LABEL_MAP[r.branch_type]}</span>
-                <span className={`text-xs font-black font-mono tabular-nums ${SURVIVAL_COLOR(r.metrics.survival_score_pct)}`}>
-                  {r.metrics.survival_score_pct}% survival
-                </span>
-              </div>
-              {r.explanation && (
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  {parseExplanationPills(r.explanation, onHighlightMonth)}
-                </p>
-              )}
-              <div className="flex gap-3 text-[10px] font-mono tabular-nums mt-1">
-                <span className="metric-pill-rose">{r.metrics.cash_out_risk_pct}% risk</span>
-                <span className="metric-pill-cyan">{r.metrics.runway_months}mo runway</span>
-                <span className={r.metrics.p10_worst_balance < 0 ? 'metric-pill-rose' : 'metric-pill-emerald'}>
-                  P10: {r.metrics.p10_worst_balance < 0 ? '-₹' : '₹'}
-                  {Math.abs(r.metrics.p10_worst_balance).toLocaleString('en-IN')}
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   );
 };

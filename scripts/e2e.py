@@ -89,11 +89,15 @@ class DirectClient:
     def __init__(self):
         init_db()
         self.db = SessionLocal()
+        from backend.db.repository import Repository
+
+        # Route functions are called directly, so pass the signed-in user explicitly
+        self.user = Repository(self.db).upsert_google_user("e2e:runner", "e2e@futurefork.local", "E2E Runner", None)
 
     async def inspect(self, csv_bytes: bytes, filename: str = "test.csv") -> dict:
         from fastapi import UploadFile
         file = UploadFile(filename=filename, file=io.BytesIO(csv_bytes))
-        return await routes.inspect_dataset(file=file, db=self.db)
+        return await routes.inspect_dataset(file=file, db=self.db, user=self.user)
 
     def commit(self, upload_id: str, mapping: dict, name: str = "E2E Dataset",
                starting_balance: float = 50000.0) -> dict:
@@ -103,36 +107,36 @@ class DirectClient:
             dataset_name=name,
             starting_balance=starting_balance,
         )
-        return routes.commit_dataset(req, db=self.db)
+        return routes.commit_dataset(req, db=self.db, user=self.user)
 
     def list_datasets(self) -> list:
-        return routes.list_datasets(db=self.db)
+        return routes.list_datasets(db=self.db, user=self.user)
 
     def get_dataset(self, dataset_id: str) -> dict:
-        return routes.get_dataset(dataset_id, db=self.db)
+        return routes.get_dataset(dataset_id, db=self.db, user=self.user)
 
     def create_decision(self, text: str, dataset_id: str) -> dict:
         req = routes.CreateDecisionRequest(text=text, dataset_id=dataset_id)
-        return routes.create_decision(req, db=self.db)
+        return routes.create_decision(req, db=self.db, user=self.user)
 
     def generate_scenarios(self, decision_id: str) -> list:
-        return routes.generate_scenarios_endpoint(decision_id, db=self.db)
+        return routes.generate_scenarios_endpoint(decision_id, db=self.db, user=self.user)
 
     def start_run(self, decision_id: str) -> dict:
-        return routes.start_run(decision_id, db=self.db)
+        return routes.start_run(decision_id, db=self.db, user=self.user)
 
     def get_run_status(self, run_id: str) -> dict:
-        return routes.get_run_status(run_id, db=self.db)
+        return routes.get_run_status(run_id, db=self.db, user=self.user)
 
     def get_scenario_result(self, scenario_id: str) -> dict:
-        return routes.get_scenario_result(scenario_id, db=self.db)
+        return routes.get_scenario_result(scenario_id, db=self.db, user=self.user)
 
     def get_comparison(self, decision_id: str) -> dict:
-        return routes.get_decision_comparison(decision_id, db=self.db)
+        return routes.get_decision_comparison(decision_id, db=self.db, user=self.user)
 
     def branch_scenario(self, parent_id: str, name: str, change: dict) -> dict:
         req = routes.BranchScenarioRequest(name=name, change=change)
-        return routes.branch_scenario_endpoint(parent_id, req, db=self.db)
+        return routes.branch_scenario_endpoint(parent_id, req, db=self.db, user=self.user)
 
     def health(self) -> dict:
         return routes.health_check()
@@ -147,7 +151,11 @@ class DirectClient:
 class LiveClient:
     def __init__(self, base_url: str):
         import httpx
-        self.c = httpx.Client(base_url=base_url, timeout=60.0)
+        self.c = httpx.Client(base_url=base_url, timeout=60.0, headers={"X-FutureFork": "1"})
+        # The API requires a session: sign in with the development login (server needs AUTH_DEV_LOGIN=1)
+        r = self.c.post("/auth/dev-login", json={"email": "e2e@futurefork.local", "name": "E2E Runner"})
+        if r.status_code != 200:
+            raise SystemExit("HTTP mode needs a session: start the server with AUTH_DEV_LOGIN=1 (development only).")
 
     async def inspect(self, csv_bytes: bytes, filename: str = "test.csv") -> dict:
         return self.c.post(

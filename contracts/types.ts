@@ -206,6 +206,7 @@ export interface StressRequest {
   inflow_delay_days: number;        // every inflow arrives this many days late
   surprise_outflow: number;         // one-off unexpected bill in the first month (₹)
   spend_increase_pct: number;       // all regular spending is this % higher
+  income_change_pct?: number;       // every month's income changes by this % (-15 = a 15% drop)
   emergency_floor?: number | null;  // score against this floor; default: the plan's
 }
 
@@ -229,6 +230,36 @@ export interface StressResponse {
   n_runs: number;
   runtime_ms: number;
   results: Record<string, StressedResult>;
+}
+
+// ─── Accounts & history ───────────────────────────────────────────────────
+
+export interface User {
+  id: string;
+  email: string;
+  name?: string | null;
+  picture?: string | null;
+}
+
+export interface AuthConfig {
+  google_client_id: string | null;
+  dev_login: boolean;
+}
+
+export interface HistoryItem {
+  id: string;
+  text: string;
+  dataset_id: string;
+  dataset_name: string;
+  status: DecisionStatus;
+  decision_kind?: DecisionKind | null;
+  understood?: string | null;
+  run_status?: ScenarioStatus | null;
+  created_at?: string | null;
+}
+
+export interface HistoryResponse {
+  items: HistoryItem[];
 }
 
 export interface ApiError {

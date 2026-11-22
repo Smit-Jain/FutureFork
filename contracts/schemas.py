@@ -148,6 +148,7 @@ class StressRequest(BaseModel):
     inflow_delay_days: float = Field(0.0, ge=0, le=90, description="Every inflow arrives this many days late")
     surprise_outflow: float = Field(0.0, ge=0, description="One-off unexpected bill in the first month (₹)")
     spend_increase_pct: float = Field(0.0, ge=-50, le=100, description="All regular spending is this % higher")
+    income_change_pct: float = Field(0.0, ge=-100, le=100, description="Every month's income changes by this % (-15 = a 15% drop)")
     emergency_floor: Optional[float] = Field(None, ge=0, description="Score against this floor (₹); default: the plan's")
 
 
@@ -171,6 +172,38 @@ class StressResponse(BaseModel):
     n_runs: int
     runtime_ms: float = Field(..., description="Total engine time for all forks")
     results: Dict[str, StressedResult]
+
+
+# ---------------------------------------------------------------------------
+# Accounts & history
+# ---------------------------------------------------------------------------
+
+class User(BaseModel):
+    id: str
+    email: str
+    name: Optional[str] = None
+    picture: Optional[str] = None
+
+
+class AuthConfig(BaseModel):
+    google_client_id: Optional[str] = Field(None, description="OAuth client ID for Google Identity Services")
+    dev_login: bool = Field(False, description="True when POST /auth/dev-login is enabled (development only)")
+
+
+class HistoryItem(BaseModel):
+    id: str
+    text: str
+    dataset_id: str
+    dataset_name: str
+    status: DecisionStatus
+    decision_kind: Optional[DecisionKind] = None
+    understood: Optional[str] = None
+    run_status: Optional[ScenarioStatus] = Field(None, description="Latest run's overall status, if it was run")
+    created_at: Optional[str] = None
+
+
+class HistoryResponse(BaseModel):
+    items: List[HistoryItem]
 
 
 class ApiError(BaseModel):

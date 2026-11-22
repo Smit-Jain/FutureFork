@@ -25,6 +25,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from backend import settings
+from backend.auth.deps import require_user
+from backend.db.models import UserModel
 from backend.db.repository import Repository, build_dataset_record
 from backend.db.session import get_db
 from backend.orchestration.integrations import (
@@ -41,6 +43,7 @@ from backend.orchestration.runner import dispatch_decision_run
 from contracts.schemas import (
     ComparisonResponse,
     FinancialScenarioResult,
+    HistoryResponse,
     RunStatus,
     Scenario,
     StressRequest,
@@ -108,18 +111,21 @@ def _dataset_type_hint(filename: str) -> Optional[str]:
     return None
 
 
-def _get_dataset_or_404(repo: Repository, dataset_id: str) -> Dict[str, Any]:
+def _get_dataset_or_404(repo: Repository, dataset_id: str, user: Optional[UserModel] = None) -> Dict[str, Any]:
+    """Shared datasets (samples) are visible to everyone signed in; others only to their owner.
+    Someone else's dataset is reported as not found, so ids can't be probed."""
     ds = repo.get_dataset(dataset_id)
-    if not ds:
+    if not ds or (user is not None and ds.get("user_id") not in (None, user.id)):
         raise _not_found("DATASET_NOT_FOUND", f"Dataset {dataset_id} not found")
     return ds
 
 
-def _get_decision_or_404(repo: Repository, decision_id: str) -> Dict[str, Any]:
-    decision = repo.get_decision(decision_id)
-    if not decision:
+def _get_decision_or_404(repo: Repository, decision_id: str, user: Optional[UserModel] = None) -> Dict[str, Any]:
+    """Decisions are private to the user who created them."""
+    exists, owner = repo.get_decision_owner(decision_id)
+    if not exists or (user is not None and owner != user.id):
         raise _not_found("DECISION_NOT_FOUND", f"Decision {decision_id} not found")
-    return decision
+    return repo.get_decision(decision_id)  # type: ignore[return-value]
 
 
 # ---------------------------------------------------------------------------
@@ -141,13 +147,13 @@ def keep_warm_ping():
 # ---------------------------------------------------------------------------
 
 @router.get("/datasets")
-def list_datasets(db: Session = Depends(get_db)):
-    return Repository(db).list_datasets()
+def list_datasets(db: Session = Depends(get_db), user: UserModel = Depends(require_user)):
+    return Repository(db).list_datasets(user.id)
 
 
 @router.get("/datasets/{dataset_id}")
-def get_dataset(dataset_id: str, db: Session = Depends(get_db)):
-    ds = _get_dataset_or_404(Repository(db), dataset_id)
+def get_dataset(dataset_id: str, db: Session = Depends(get_db), user: UserModel = Depends(require_user)):
+    ds = _get_dataset_or_404(Repository(db), dataset_id, user)
     return {
         "id": ds["id"],
         "name": ds["name"],
@@ -165,7 +171,7 @@ def get_dataset(dataset_id: str, db: Session = Depends(get_db)):
 @router.post("/datasets/inspect", status_code=status.HTTP_200_OK)
 async def inspect_dataset(
     file: UploadFile = File(..., description="Financial CSV file (bank/UPI/ERP/P&L)"),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db), user: UserModel = Depends(require_user),
 ):
     """
     Reads the uploaded CSV, proposes a ColumnMapping, and returns a 5-row preview.
@@ -215,6 +221,7 @@ async def inspect_dataset(
         preview_rows=preview_rows,
         column_mapping={**proposed_mapping, "_dataset_type": dataset_type},
         ttl_minutes=UPLOAD_TTL_MINUTES,
+        user_id=user.id,
     )
 
     return {
@@ -237,11 +244,11 @@ async def inspect_dataset(
 # ---------------------------------------------------------------------------
 
 @router.post("/datasets/commit", status_code=status.HTTP_201_CREATED)
-def commit_dataset(req: CommitRequest, db: Session = Depends(get_db)):
+def commit_dataset(req: CommitRequest, db: Session = Depends(get_db), user: UserModel = Depends(require_user)):
     """Compiles the uploaded CSV into a 12-month baseline (Node 0) and saves it as a dataset."""
     repo = Repository(db)
     upload = repo.get_upload(req.upload_id)
-    if not upload:
+    if not upload or upload.get("user_id") not in (None, user.id):
         raise _not_found(
             "UPLOAD_NOT_FOUND",
             f"Upload {req.upload_id} not found or has expired (15-min TTL). "
@@ -283,6 +290,7 @@ def commit_dataset(req: CommitRequest, db: Session = Depends(get_db)):
         )
 
     record = build_dataset_record(instance, dataset_id, ds_name, dataset_type, filename, mapping)
+    record["user_id"] = user.id
     repo.save_dataset(record)
     repo.delete_upload(req.upload_id)
 
@@ -321,9 +329,9 @@ def _extract_baseline_risks(metrics: Dict[str, Any]) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 @router.post("/decisions", status_code=status.HTTP_201_CREATED)
-def create_decision(req: CreateDecisionRequest, db: Session = Depends(get_db)):
+def create_decision(req: CreateDecisionRequest, db: Session = Depends(get_db), user: UserModel = Depends(require_user)):
     repo = Repository(db)
-    ds = _get_dataset_or_404(repo, req.dataset_id)
+    ds = _get_dataset_or_404(repo, req.dataset_id, user)
     payload = ds.get("payload") or {}
     spec = call_parse_decision(
         req.text,
@@ -331,7 +339,7 @@ def create_decision(req: CreateDecisionRequest, db: Session = Depends(get_db)):
         instance=load_instance(payload),
         dataset_type=dataset_type_of(payload),
     )
-    repo.save_decision(spec)
+    repo.save_decision(spec, user_id=user.id)
     return spec
 
 
@@ -355,9 +363,9 @@ def _generate_and_save_scenarios(repo: Repository, decision: Dict[str, Any]) -> 
 
 
 @router.post("/decisions/{decision_id}/scenarios", response_model=list[Scenario])
-def generate_scenarios_endpoint(decision_id: str, db: Session = Depends(get_db)):
+def generate_scenarios_endpoint(decision_id: str, db: Session = Depends(get_db), user: UserModel = Depends(require_user)):
     repo = Repository(db)
-    return _generate_and_save_scenarios(repo, _get_decision_or_404(repo, decision_id))
+    return _generate_and_save_scenarios(repo, _get_decision_or_404(repo, decision_id, user))
 
 
 # ---------------------------------------------------------------------------
@@ -365,9 +373,9 @@ def generate_scenarios_endpoint(decision_id: str, db: Session = Depends(get_db))
 # ---------------------------------------------------------------------------
 
 @router.post("/decisions/{decision_id}/run")
-def start_run(decision_id: str, db: Session = Depends(get_db)):
+def start_run(decision_id: str, db: Session = Depends(get_db), user: UserModel = Depends(require_user)):
     repo = Repository(db)
-    decision = _get_decision_or_404(repo, decision_id)
+    decision = _get_decision_or_404(repo, decision_id, user)
 
     scenarios = repo.get_scenarios(decision_id) or _generate_and_save_scenarios(repo, decision)
 
@@ -382,9 +390,10 @@ def start_run(decision_id: str, db: Session = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @router.get("/runs/{run_id}", response_model=RunStatus)
-def get_run_status(run_id: str, db: Session = Depends(get_db)):
-    run_info = Repository(db).get_run(run_id)
-    if not run_info:
+def get_run_status(run_id: str, db: Session = Depends(get_db), user: UserModel = Depends(require_user)):
+    repo = Repository(db)
+    run_info = repo.get_run(run_id)
+    if not run_info or repo.get_decision_owner(run_info["decision_id"])[1] != user.id:
         raise _not_found("RUN_NOT_FOUND", f"Run {run_id} not found")
     return run_info
 
@@ -394,9 +403,10 @@ def get_run_status(run_id: str, db: Session = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @router.get("/scenarios/{scenario_id}/result", response_model=FinancialScenarioResult)
-def get_scenario_result(scenario_id: str, db: Session = Depends(get_db)):
-    raw = Repository(db).get_result(scenario_id)
-    if not raw:
+def get_scenario_result(scenario_id: str, db: Session = Depends(get_db), user: UserModel = Depends(require_user)):
+    repo = Repository(db)
+    raw = repo.get_result(scenario_id)
+    if not raw or repo.get_decision_owner(raw.get("decision_id") or "")[1] != user.id:
         raise _not_found("RESULT_NOT_FOUND", f"Result for {scenario_id} not found or not yet ready")
     return to_api_result(raw)
 
@@ -406,9 +416,9 @@ def get_scenario_result(scenario_id: str, db: Session = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @router.get("/decisions/{decision_id}/compare", response_model=ComparisonResponse)
-def get_decision_comparison(decision_id: str, db: Session = Depends(get_db)):
+def get_decision_comparison(decision_id: str, db: Session = Depends(get_db), user: UserModel = Depends(require_user)):
     repo = Repository(db)
-    decision = _get_decision_or_404(repo, decision_id)
+    decision = _get_decision_or_404(repo, decision_id, user)
     scenarios = repo.get_scenarios(decision_id)
 
     raw_results: Dict[str, Any] = {}
@@ -431,14 +441,14 @@ def get_decision_comparison(decision_id: str, db: Session = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @router.post("/decisions/{decision_id}/stress", response_model=StressResponse)
-def stress_decision(decision_id: str, req: StressRequest, db: Session = Depends(get_db)):
+def stress_decision(decision_id: str, req: StressRequest, db: Session = Depends(get_db), user: UserModel = Depends(require_user)):
     """
     Re-runs the Monte Carlo simulation for every fork of a decision with extra shocks
     (late inflows, a surprise bill, higher spending, a different floor). Takes a few ms,
     so the UI can call it as sliders move.
     """
     repo = Repository(db)
-    decision = _get_decision_or_404(repo, decision_id)
+    decision = _get_decision_or_404(repo, decision_id, user)
     scenarios = repo.get_scenarios(decision_id)
     if not scenarios:
         raise HTTPException(
@@ -463,6 +473,16 @@ def stress_decision(decision_id: str, req: StressRequest, db: Session = Depends(
 
 
 # ---------------------------------------------------------------------------
+# 10c. GET /me/decisions — the signed-in user's history
+# ---------------------------------------------------------------------------
+
+@router.get("/me/decisions", response_model=HistoryResponse)
+def my_decisions(limit: int = 100, db: Session = Depends(get_db), user: UserModel = Depends(require_user)):
+    """The signed-in user's decisions, newest first."""
+    return {"items": Repository(db).list_decisions_for(user.id, limit=max(1, min(limit, 500)))}
+
+
+# ---------------------------------------------------------------------------
 # 11. POST /scenarios/{id}/branch — user-defined child fork
 # ---------------------------------------------------------------------------
 
@@ -474,13 +494,13 @@ def stress_decision(decision_id: str, req: StressRequest, db: Session = Depends(
 def branch_scenario_endpoint(
     parent_scenario_id: str,
     req: BranchScenarioRequest,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db), user: UserModel = Depends(require_user),
 ):
     repo = Repository(db)
     from backend.db.models import ScenarioModel
 
     parent = repo.db.query(ScenarioModel).filter(ScenarioModel.id == parent_scenario_id).first()
-    if not parent:
+    if not parent or repo.get_decision_owner(parent.decision_id)[1] != user.id:
         raise _not_found("PARENT_NOT_FOUND", f"Parent scenario {parent_scenario_id} not found")
 
     from engine.changes import normalize_branch_type
@@ -494,7 +514,7 @@ def branch_scenario_endpoint(
         )
 
     # Child inherits the decision's purchase goal, then the parent's params; the request overrides
-    decision = _get_decision_or_404(repo, parent.decision_id)
+    decision = _get_decision_or_404(repo, parent.decision_id, user)
     params = {
         **((decision.get("change") or {}).get("params") or {}),
         **((parent.change or {}).get("params") or {}),
