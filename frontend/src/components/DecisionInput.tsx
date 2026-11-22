@@ -1,6 +1,10 @@
-import React from 'react';
-import { AlertTriangle, CheckCircle2, Loader2, Sparkles, Zap } from 'lucide-react';
+import React, { useMemo, useRef } from 'react';
+import { AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react';
 import { DatasetType, DecisionSpec } from '../contracts/types';
+import { DetectedChips } from '../decide/DetectedChips';
+import { LiquidityBasis, PreflightBar } from '../decide/PreflightBar';
+import { SimControls, StressMode } from '../decide/SimControls';
+import { DecisionTag, detect, withCadence, withFloor, withSpend } from '../decide/parseDecision';
 
 export const EXAMPLE_PROMPTS: Record<DatasetType, string[]> = {
   personal: [
@@ -23,6 +27,21 @@ export const EXAMPLE_PROMPTS: Record<DatasetType, string[]> = {
   ],
 };
 
+const TAG_COLOR: Record<DecisionTag, string> = {
+  CAPEX: '#0f6b8f',
+  HIRING: '#6d4bd1',
+  RECURRING: '#c76a12',
+  STRESS: '#d6345f',
+};
+
+/** Rounds up to a "nice" slider maximum: 1, 2 or 5 × 10^k. */
+const niceCeil = (v: number): number => {
+  if (v <= 0) return 100000;
+  const p = Math.pow(10, Math.floor(Math.log10(v)));
+  for (const m of [1, 2, 5, 10]) if (m * p >= v) return m * p;
+  return 10 * p;
+};
+
 interface DecisionInputProps {
   promptText: string;
   setPromptText: (text: string) => void;
@@ -31,8 +50,17 @@ interface DecisionInputProps {
   isRunning: boolean;
   statusMessage: string;
   decisionSpec: DecisionSpec | null;
+  basis: LiquidityBasis | null;
+  stressMode: StressMode;
+  onStressMode: (m: StressMode) => void;
+  runProgress: number;
 }
 
+/**
+ * The decision workbench. A live client-side preview (chips, pre-flight bar) helps the user shape
+ * the prompt; chip and slider edits are written back into the text, which is the only thing the
+ * API receives. The server's reading appears as "Understood as" after a run.
+ */
 export const DecisionInput: React.FC<DecisionInputProps> = ({
   promptText,
   setPromptText,
@@ -41,73 +69,150 @@ export const DecisionInput: React.FC<DecisionInputProps> = ({
   isRunning,
   statusMessage,
   decisionSpec,
+  basis,
+  stressMode,
+  onStressMode,
+  runProgress,
 }) => {
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const textRef = useRef<HTMLTextAreaElement>(null);
+  const detected = useMemo(() => detect(promptText), [promptText]);
+  const presets = useMemo(() => EXAMPLE_PROMPTS[datasetType].map((p) => ({ text: p, tag: detect(p).tag })), [datasetType]);
+
+  const available = basis ? Math.max(0, basis.opening + basis.surplus) : 0;
+  const floorMax = niceCeil(Math.max(available, (detected.floor?.value ?? 0) * 2, 100000));
+
+  const handleSubmit = (e?: React.FormEvent) => {
+    e?.preventDefault();
     if (!promptText.trim() || isRunning) return;
     onRun(promptText.trim());
   };
 
   const needsClarification = decisionSpec && decisionSpec.status !== 'ok';
   const understood = decisionSpec?.status === 'ok' ? decisionSpec.understood : null;
+  const isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform);
 
   return (
-    <form onSubmit={handleSubmit} className="glass-card p-5 space-y-4">
-      <label htmlFor="decision-prompt" className="text-xs font-bold uppercase tracking-widest text-slate-400 flex items-center gap-2">
-        <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-        Describe your decision
-      </label>
+    <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.55fr)_minmax(300px,1fr)] gap-x-10 gap-y-6" data-tour="prompt">
+      {/* ── Left: prompt, detected parameters, presets, controls, CTA ── */}
+      <div className="space-y-4 min-w-0">
+        <div className="relative brackets border border-ink bg-paper-2 focus-within:bg-white/50 transition-colors">
+          <div className="flex items-center justify-between gap-3 border-b border-ink-line px-3 h-8">
+            <label htmlFor="decision-prompt" className="font-mono text-[11px] uppercase tracking-[0.06em] flex items-center gap-2">
+              <span className="text-brand-coral" aria-hidden="true">&gt;</span> Decision
+            </label>
+            <span className="label text-[10px] hidden sm:inline">Plain English · Hinglish works too</span>
+          </div>
+          <textarea
+            ref={textRef}
+            id="decision-prompt"
+            value={promptText}
+            onChange={(e) => setPromptText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSubmit();
+            }}
+            rows={3}
+            spellCheck={false}
+            className="block w-full bg-transparent px-4 py-3 text-[16px] leading-relaxed resize-none placeholder:text-ink-dim focus:outline-none"
+            placeholder="e.g. Buy a ₹1.2L laptop on EMI without dropping below ₹30k emergency savings"
+          />
+        </div>
 
-      <textarea
-        id="decision-prompt"
-        value={promptText}
-        onChange={(e) => setPromptText(e.target.value)}
-        rows={2}
-        className="dark-input w-full text-sm leading-relaxed resize-none"
-        placeholder="e.g. Buy a ₹1.2L laptop on EMI without dropping below ₹30k emergency savings"
-      />
+        <DetectedChips
+          detected={detected}
+          onSpend={(v) => setPromptText(withSpend(promptText, detected, v))}
+          onFloor={(v) => setPromptText(withFloor(promptText, detected, v))}
+          onCadence={(c) => setPromptText(withCadence(promptText, detected, c))}
+        />
 
-      <div className="flex flex-wrap gap-2">
-        {EXAMPLE_PROMPTS[datasetType].map((p) => (
+        <div className="space-y-2">
+          <span className="label text-[10px]">Try a preset</span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" aria-label="Example decisions">
+            {presets.map(({ text, tag }) => {
+              const active = promptText === text;
+              return (
+                <button
+                  key={text}
+                  type="button"
+                  onClick={() => {
+                    setPromptText(text);
+                    textRef.current?.focus();
+                  }}
+                  className={`group text-left px-3 py-2 border flex items-start gap-2.5 transition-all duration-200
+                              ${active ? 'border-ink bg-ink text-paper' : 'border-ink-faint bg-paper-2 hover:border-ink hover:-translate-y-px hover:shadow-paper'}`}
+                >
+                  <span
+                    className="shrink-0 mt-0.5 font-mono text-[9.5px] tracking-[0.06em] px-1 border"
+                    style={{ color: active ? '#efece6' : TAG_COLOR[tag], borderColor: active ? '#efece6' : TAG_COLOR[tag] }}
+                  >
+                    {tag}
+                  </span>
+                  <span className="text-[13px] leading-snug">{text}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <SimControls
+          stressMode={stressMode}
+          onStressMode={onStressMode}
+          floor={detected.floor?.value ?? 0}
+          floorMax={floorMax}
+          onFloor={(v) => setPromptText(withFloor(promptText, detected, v))}
+        />
+
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <span className="label text-[10px]" aria-live="polite">
+            {isRunning ? statusMessage : 'Amounts: ₹, lakh (L), crore (Cr) or k'}
+          </span>
           <button
-            key={p}
-            type="button"
-            onClick={() => setPromptText(p)}
-            className="px-3 py-1.5 rounded-lg text-[11px] text-left border border-white/10 bg-white/5 text-slate-400
-                       hover:bg-emerald-500/10 hover:border-emerald-500/30 hover:text-emerald-300 transition-colors"
+            type="submit"
+            disabled={isRunning || !promptText.trim()}
+            className="relative h-11 pl-5 pr-2 bg-ink text-paper font-mono text-xs uppercase tracking-[0.08em] flex items-center gap-3
+                       hover:bg-ink-2 transition-colors disabled:cursor-not-allowed overflow-hidden min-w-[220px] justify-between"
           >
-            {p}
+            <span className="absolute left-0 top-0 h-[2px] w-1/2 bg-brand-linear" />
+            <span className="absolute left-0 top-0 w-[2px] h-full bg-brand-linear" />
+            {isRunning && (
+              <span className="absolute left-0 bottom-0 h-[3px] bg-brand-linear transition-[width] duration-500 ease-editorial" style={{ width: `${Math.max(6, runProgress)}%` }} />
+            )}
+            <span className="flex items-center gap-2">
+              {isRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <span aria-hidden="true">⑂</span>}
+              {isRunning ? `Simulating · ${Math.round(runProgress)}%` : 'Fork & simulate'}
+            </span>
+            <kbd className={`font-mono text-[10px] px-1.5 h-6 inline-flex items-center border border-paper/30 ${isRunning ? 'opacity-0' : 'opacity-70'}`}>
+              {isMac ? '⌘' : 'Ctrl'} ↵
+            </kbd>
           </button>
-        ))}
+        </div>
       </div>
 
-      {understood && (
-        <div className="flex items-start gap-2 px-4 py-3 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-200 text-xs">
-          <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5 text-emerald-400" />
-          <span><span className="font-semibold text-emerald-300">Understood as:</span> {understood}</span>
-        </div>
-      )}
+      {/* ── Right: pre-flight + the engine's reading ── */}
+      <aside className="space-y-5 order-first lg:order-none lg:border-l lg:border-ink-line lg:pl-8 min-w-0">
+        <PreflightBar detected={detected} basis={basis} />
 
-      {needsClarification && (
-        <div className="flex items-start gap-2 px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs">
-          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-          <span>{decisionSpec?.message || 'Please include an amount like ₹60L, ₹1.2 lakh or ₹30,000.'}</span>
-        </div>
-      )}
-
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-xs text-slate-500">{isRunning ? statusMessage : 'Amounts can use ₹, lakh (L), crore (Cr) or k.'}</span>
-        <button
-          type="submit"
-          disabled={isRunning || !promptText.trim()}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm text-white
-                     bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400
-                     shadow-glow transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none"
-        >
-          {isRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4 fill-white" />}
-          {isRunning ? 'Simulating…' : 'Fork & Simulate'}
-        </button>
-      </div>
+        {understood && (
+          <div className="flex items-start gap-2.5 px-3 py-2.5 border-l-2 border-good bg-good/5 text-sm animate-in">
+            <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5 text-good" />
+            <span>
+              <span className="label text-good block mb-0.5">Understood by the engine as</span>
+              {understood}
+            </span>
+          </div>
+        )}
+        {needsClarification && (
+          <div role="alert" className="flex items-start gap-2.5 px-3 py-2.5 border-l-2 border-warn bg-warn/5 text-sm animate-in">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-warn" />
+            <span>{decisionSpec?.message || 'Please include an amount like ₹60L, ₹1.2 lakh or ₹30,000.'}</span>
+          </div>
+        )}
+        {!understood && !needsClarification && (
+          <p className="text-[12px] text-ink-dim leading-relaxed">
+            The chips are a live preview from your text. After you run, the engine's own reading appears here, and every result
+            number comes from CP-SAT and the Monte Carlo simulation.
+          </p>
+        )}
+      </aside>
     </form>
   );
 };

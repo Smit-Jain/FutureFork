@@ -3,14 +3,17 @@ import {
   CommitRequest,
   CommitResponse,
   ComparisonResponse,
+  AuthConfig,
   DatasetSummary,
   DecisionSpec,
+  HistoryResponse,
   FinancialScenarioResult,
   InspectResponse,
   RunStatus,
   Scenario,
   StressRequest,
   StressResponse,
+  User,
 } from '../contracts/types';
 import { buildMockComparison, MOCK_INSPECT_RESPONSE, SAMPLE_DATASETS } from '../mocks/fixtures';
 
@@ -21,20 +24,42 @@ export const isMockMode = USE_MOCKS;
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Reads the backend's {error, message} body (or FastAPI's {detail: {...}}) into an Error. */
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE_URL}${path}`, init);
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number, readonly code?: string) {
+    super(message);
+  }
+}
+
+/** Where the app sends people whose session has ended (set by the auth layer). */
+let onUnauthorized: (() => void) | null = null;
+export const setUnauthorizedHandler = (fn: (() => void) | null) => {
+  onUnauthorized = fn;
+};
+
+/**
+ * Every call sends the session cookie (credentials: 'include') and the CSRF header the backend
+ * requires on state-changing requests. Reads the backend's {error, message} body (or FastAPI's
+ * {detail: {...}}) into an ApiError; a 401 also triggers the sign-in redirect.
+ */
+async function request<T>(path: string, init?: RequestInit, opts: { redirectOn401?: boolean } = {}): Promise<T> {
+  const headers = new Headers(init?.headers);
+  headers.set('X-FutureFork', '1');
+  const res = await fetch(`${API_BASE_URL}${path}`, { ...init, headers, credentials: 'include' });
+  if (res.status === 401 && opts.redirectOn401 !== false) onUnauthorized?.();
   if (!res.ok) {
     let message = res.statusText;
+    let code: string | undefined;
     try {
       const body = await res.json();
       const detail = body?.detail ?? body;
       message = detail?.message || (typeof detail === 'string' ? detail : message);
+      code = detail?.error;
     } catch {
       /* non-JSON error body */
     }
-    throw new Error(message || `Request failed (${res.status})`);
+    throw new ApiError(message || `Request failed (${res.status})`, res.status, code);
   }
+  if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
 
@@ -47,7 +72,46 @@ const json = (body: unknown): RequestInit => ({
 // Mock-mode state
 const mockDecisions: Record<string, { text: string; datasetId: string; startedAt: number }> = {};
 
+const MOCK_USER: User = { id: 'mock', email: 'demo@futurefork.local', name: 'Mock User', picture: null };
+
 export const api = {
+  // ─── Auth ────────────────────────────────────────────────────────────────
+  async authConfig(): Promise<AuthConfig> {
+    if (USE_MOCKS) return { google_client_id: null, dev_login: true };
+    return request('/auth/config', undefined, { redirectOn401: false });
+  },
+
+  /** The signed-in user, or null (never redirects). */
+  async me(): Promise<User | null> {
+    if (USE_MOCKS) return MOCK_USER;
+    try {
+      return await request<User>('/auth/me', undefined, { redirectOn401: false });
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) return null;
+      throw err;
+    }
+  },
+
+  async signInWithGoogle(credential: string): Promise<User> {
+    if (USE_MOCKS) return MOCK_USER;
+    return request('/auth/google', json({ credential }), { redirectOn401: false });
+  },
+
+  async devLogin(email?: string): Promise<User> {
+    if (USE_MOCKS) return MOCK_USER;
+    return request('/auth/dev-login', json(email ? { email } : {}), { redirectOn401: false });
+  },
+
+  async logout(): Promise<void> {
+    if (USE_MOCKS) return;
+    await request('/auth/logout', { method: 'POST' }, { redirectOn401: false });
+  },
+
+  async getHistory(): Promise<HistoryResponse> {
+    if (USE_MOCKS) return { items: [] };
+    return request('/me/decisions');
+  },
+
   async getHealth(): Promise<{ status: string }> {
     if (USE_MOCKS) return { status: 'ok' };
     return request('/health');
@@ -64,6 +128,22 @@ export const api = {
       }));
     }
     return request('/datasets');
+  },
+
+  /** One dataset with its engine-compiled stats (opening balance, 12-month totals). */
+  async getDataset(datasetId: string): Promise<DatasetSummary> {
+    if (USE_MOCKS) {
+      const d = SAMPLE_DATASETS.find((x) => x.id === datasetId);
+      if (!d) throw new Error(`Unknown dataset ${datasetId}`);
+      return {
+        id: d.id,
+        name: d.name,
+        description: d.description,
+        stats: { months: 12, categories: 8, starting_balance: 0, total_inflow: 0, total_outflow: 0, category_types: {} },
+        baseline_metrics: {},
+      };
+    }
+    return request(`/datasets/${datasetId}`);
   },
 
   async inspectDataset(file: File): Promise<InspectResponse> {

@@ -7,9 +7,38 @@ Member 5 additions:
 """
 
 
-from sqlalchemy import JSON, Column, DateTime, Float, String, Text, func
+from datetime import datetime, timezone
+
+from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, String, Text
+
+
+def utcnow() -> datetime:
+    """Naive UTC timestamp, set by the app so every database stores the same clock
+    (Postgres' now() would otherwise use the server's local time zone)."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 from backend.db.session import Base
+
+# ---------------------------------------------------------------------------
+# Users (Google Sign-In)
+# ---------------------------------------------------------------------------
+
+class UserModel(Base):
+    __tablename__ = "users"
+
+    id            = Column(String(64), primary_key=True)             # uuid4 hex
+    google_sub    = Column(String(255), nullable=False, unique=True, index=True)  # Google's stable user id
+    email         = Column(String(320), nullable=False, index=True)
+    name          = Column(String(255), nullable=True)
+    picture       = Column(Text, nullable=True)
+    created_at    = Column(DateTime, default=utcnow)
+    last_login_at = Column(DateTime, default=utcnow)
+
+
+def _owner():
+    """Owning user; NULL for shared rows such as the bundled sample datasets."""
+    return Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+
 
 # ---------------------------------------------------------------------------
 # MEMBER 5: Upload buffer for POST /datasets/inspect → POST /datasets/commit
@@ -24,7 +53,8 @@ class UploadModel(Base):
     preview_rows = Column(JSON,  nullable=True)          # 5-row preview list[dict]
     column_mapping = Column(JSON, nullable=True)         # proposed ColumnMapping dict
     expires_at   = Column(DateTime, nullable=False)      # created_at + 15 min TTL
-    created_at   = Column(DateTime, default=func.now())
+    created_at   = Column(DateTime, default=utcnow)
+    user_id      = _owner()
 
 
 # ---------------------------------------------------------------------------
@@ -40,7 +70,8 @@ class DatasetModel(Base):
     stats            = Column(JSON, nullable=False)
     baseline_metrics = Column(JSON, nullable=False)
     payload          = Column(JSON, nullable=True)   # Full dataset bundle
-    created_at       = Column(DateTime, default=func.now())
+    created_at       = Column(DateTime, default=utcnow)
+    user_id          = _owner()
 
 
 class DecisionModel(Base):
@@ -52,7 +83,8 @@ class DecisionModel(Base):
     status     = Column(String(50), default="ok")
     message    = Column(Text, nullable=True)
     spec       = Column(JSON, nullable=False)         # DecisionSpec dict
-    created_at = Column(DateTime, default=func.now())
+    created_at = Column(DateTime, default=utcnow, index=True)
+    user_id    = _owner()
 
 
 class ScenarioModel(Base):
@@ -65,7 +97,7 @@ class ScenarioModel(Base):
     description = Column(Text, nullable=True)
     change      = Column(JSON, nullable=False)
     status      = Column(String(50), default="queued")  # queued|running|done|failed
-    created_at  = Column(DateTime, default=func.now())
+    created_at  = Column(DateTime, default=utcnow)
 
 
 class RunModel(Base):
@@ -76,8 +108,8 @@ class RunModel(Base):
     overall_status   = Column(String(50), default="queued")  # queued|running|done|failed
     progress_percent = Column(Float, default=0.0)
     scenario_statuses = Column(JSON, default=dict)           # Dict[scenario_id, status]
-    created_at       = Column(DateTime, default=func.now())
-    updated_at       = Column(DateTime, default=func.now(), onupdate=func.now())
+    created_at       = Column(DateTime, default=utcnow)
+    updated_at       = Column(DateTime, default=utcnow, onupdate=utcnow)
 
 
 class ResultModel(Base):
@@ -87,7 +119,7 @@ class ResultModel(Base):
     decision_id = Column(String(100), nullable=True, index=True)
     branch_type = Column(String(50), nullable=True)
     payload     = Column(JSON, nullable=False)   # raw engine ScenarioEvaluationResult dict
-    created_at  = Column(DateTime, default=func.now())
+    created_at  = Column(DateTime, default=utcnow)
 
 
 class CacheModel(Base):
@@ -95,4 +127,4 @@ class CacheModel(Base):
 
     cache_key  = Column(String(255), primary_key=True, index=True)
     result     = Column(JSON, nullable=False)
-    created_at = Column(DateTime, default=func.now())
+    created_at = Column(DateTime, default=utcnow)

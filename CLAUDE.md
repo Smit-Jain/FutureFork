@@ -42,6 +42,10 @@ Run lint, `pytest`, the E2E script, the evals and the frontend build before cons
 
 ```
 frontend/   React 18 + Vite + Tailwind + Recharts. Talks to the backend only via REST.
+            pages/Landing.tsx (/) with a three.js robot in landing/robot/ (lazy chunk),
+            pages/Workspace.tsx (/app). Light editorial theme: tokens in tailwind.config.js,
+            fork colours/labels in src/theme/forks.ts. The decide step (src/decide/) previews the
+            prompt client-side; chip/slider edits rewrite the prompt text, which is all the API receives.
 backend/    FastAPI. routes.py (endpoints), orchestration/ (runner, cache, engine/AI bridge),
             db/ (SQLAlchemy models, repository, sample seeding), settings.py (env / .env)
 ai/         agents/mapper.py (CSV column mapping), parser.py (decision parsing),
@@ -55,6 +59,10 @@ contracts/  schemas.py (source of truth, enforced as FastAPI response models),
 ```
 
 **Boundaries:** `engine/` never touches HTTP, databases or LLMs. `ai/` never computes metrics. The backend is the only place that wires them together (`backend/orchestration/integrations.py`).
+
+**Auth:** Google Sign-In is required for `/app` and every API route except `/health`, `/ping`, `/auth/*` (`backend/auth/`). Routes take `user = Depends(require_user)` and must check ownership (`_get_dataset_or_404` / `_get_decision_or_404` return 404 for other users' rows). POSTs need the `X-FutureFork: 1` header. Use `AUTH_DEV_LOGIN=1` locally; tests call route functions with `user=`.
+
+**Database:** schema changes go in a new Alembic revision (`backend/db/migrations/versions`), never by editing old ones; `init_db()` runs `upgrade head`. Write timestamps with `models.utcnow`.
 
 **Request flow:** `POST /datasets/inspect` → `POST /datasets/commit` (12-month Node 0 baseline) → `POST /decisions` (parse) → `POST /decisions/{id}/scenarios` (fan-out) → `POST /decisions/{id}/run` (background solve + Monte Carlo) → `GET /runs/{id}` → `GET /decisions/{id}/compare`. The Crisis Playground calls `POST /decisions/{id}/stress`, which re-runs the Monte Carlo simulation with user shocks (engine numbers, not a browser estimate).
 
@@ -78,7 +86,7 @@ The single engine entry point is `engine.solver.evaluate_financial_branch(instan
 - **New fork type:** see "Adding a New Fork Type" in `README.md` (transformer, solver, `FORKS_BY_KIND`, scenario metadata, contracts, UI labels, tests).
 - **Tests** must assert engine-computed results, not just "something came back". Don't write tests that accept `failed` as success.
 - **Cache:** bump `CACHE_VERSION` in `backend/orchestration/caching.py` when the stored result format changes.
-- **Database:** there are no migrations. A column change requires recreating the local `futurefork.db`; mention it in the PR.
+- **Database:** Alembic migrations (`alembic revision -m "..."`, then `alembic upgrade head`); keep them idempotent like 0001/0002.
 - **Style:** ruff with line length 100. Keep modules pure where they are pure.
 
 ## Git and pull requests

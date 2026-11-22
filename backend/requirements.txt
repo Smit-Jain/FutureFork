@@ -4,6 +4,10 @@ pydantic>=2.10.0
 pydantic-settings>=2.7.0
 sqlalchemy>=2.0.35
 psycopg2-binary>=2.9.9       # PostgreSQL driver (binary = no build deps)
+alembic>=1.13               # versioned schema migrations
+google-auth>=2.30           # verifies Google Sign-In ID tokens
+requests>=2.31              # HTTP transport google-auth uses to fetch Google's signing keys
+PyJWT>=2.8                  # signed session cookie
 httpx>=0.28.0
 numpy>=2.0.0
 pandas>=2.0.0

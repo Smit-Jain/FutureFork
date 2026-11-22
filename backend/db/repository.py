@@ -6,7 +6,9 @@ Seeds the bundled sample CSVs as ready-to-use financial datasets on startup.
 
 import base64
 import logging
+import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -19,8 +21,9 @@ from backend.db.models import (
     RunModel,
     ScenarioModel,
     UploadModel,
+    UserModel,
 )
-from backend.db.session import Base, SessionLocal, engine
+from backend.db.session import DATABASE_URL, SessionLocal, engine
 
 logger = logging.getLogger("futurefork.db")
 
@@ -82,9 +85,17 @@ def build_dataset_record(
     }
 
 
-def init_db():
+ROOT_DIR = Path(__file__).resolve().parents[2]
+
+
+def run_migrations() -> None:
+    """Brings the database to the latest Alembic revision (idempotent; safe on every start)."""
+    from alembic import command
+    from alembic.config import Config
     from sqlalchemy import inspect, text
 
+    # Pre-Alembic repair (from upstream 17c4887): very old local DBs had a results table with
+    # another shape; drop it so migration 0001 recreates it. Results are a cache of engine output.
     with engine.connect() as conn:
         inspector = inspect(conn)
         if "results" in inspector.get_table_names():
@@ -94,7 +105,15 @@ def init_db():
                 conn.execute(text("DROP TABLE results"))
                 conn.commit()
 
-    Base.metadata.create_all(bind=engine)
+    cfg = Config(str(ROOT_DIR / "alembic.ini"))
+    cfg.set_main_option("script_location", str(ROOT_DIR / "backend" / "db" / "migrations"))
+    cfg.attributes["embedded"] = True  # keep the app's logging configuration
+    command.upgrade(cfg, "head")
+    logger.info("Database schema is up to date (%s)", DATABASE_URL.split("://", 1)[0])
+
+
+def init_db():
+    run_migrations()
     db = SessionLocal()
     try:
         repo = Repository(db)
@@ -130,6 +149,7 @@ class Repository:
         preview_rows: List[Dict[str, Any]],
         column_mapping: Dict[str, Any],
         ttl_minutes: int = 15,
+        user_id: Optional[str] = None,
     ) -> UploadModel:
         """Persist raw CSV bytes (base64) with a TTL expiry for /datasets/inspect."""
         encoded = base64.b64encode(csv_bytes).decode("utf-8")
@@ -141,6 +161,7 @@ class Repository:
             preview_rows=preview_rows,
             column_mapping=column_mapping,
             expires_at=expires,
+            user_id=user_id,
         )
         self.db.merge(model)
         self.db.commit()
@@ -163,6 +184,7 @@ class Repository:
             "preview_rows": row.preview_rows,
             "column_mapping": row.column_mapping,
             "expires_at": row.expires_at.isoformat(),
+            "user_id": row.user_id,
         }
 
     def delete_upload(self, upload_id: str) -> None:
@@ -175,8 +197,11 @@ class Repository:
     # Dataset queries
     # ------------------------------------------------------------------
 
-    def list_datasets(self) -> List[Dict[str, Any]]:
-        rows = self.db.query(DatasetModel).all()
+    def list_datasets(self, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Shared datasets (the samples) plus the given user's own, newest first after the samples."""
+        q = self.db.query(DatasetModel)
+        q = q.filter((DatasetModel.user_id.is_(None)) | (DatasetModel.user_id == user_id)) if user_id else q.filter(DatasetModel.user_id.is_(None))
+        rows = q.order_by(DatasetModel.user_id.isnot(None), DatasetModel.created_at.desc()).all()
         return [
             {
                 "id": r.id,
@@ -197,6 +222,7 @@ class Repository:
             stats=ds_dict["stats"],
             baseline_metrics=ds_dict["baseline_metrics"],
             payload=ds_dict.get("payload"),
+            user_id=ds_dict.get("user_id"),
         )
         self.db.merge(model)
         self.db.commit()
@@ -213,13 +239,14 @@ class Repository:
             "stats": r.stats,
             "baseline_metrics": r.baseline_metrics,
             "payload": r.payload,
+            "user_id": r.user_id,
         }
 
     # ------------------------------------------------------------------
     # Decision queries
     # ------------------------------------------------------------------
 
-    def save_decision(self, spec: Dict[str, Any]) -> DecisionModel:
+    def save_decision(self, spec: Dict[str, Any], user_id: Optional[str] = None) -> DecisionModel:
         model = DecisionModel(
             id=spec["id"],
             text=spec["text"],
@@ -227,6 +254,7 @@ class Repository:
             status=spec["status"],
             message=spec.get("message"),
             spec=spec,
+            user_id=user_id,
         )
         self.db.merge(model)
         self.db.commit()
@@ -235,6 +263,66 @@ class Repository:
     def get_decision(self, decision_id: str) -> Optional[Dict[str, Any]]:
         row = self.db.query(DecisionModel).filter(DecisionModel.id == decision_id).first()
         return row.spec if row else None
+
+    def get_decision_owner(self, decision_id: str) -> tuple[bool, Optional[str]]:
+        """(exists, owning user id) for a decision."""
+        row = self.db.query(DecisionModel.user_id).filter(DecisionModel.id == decision_id).first()
+        return (row is not None, row[0] if row else None)
+
+    def list_decisions_for(self, user_id: str, limit: int = 100) -> List[Dict[str, Any]]:
+        """A user's decisions, newest first, with dataset name and the latest run's status."""
+        rows = (
+            self.db.query(DecisionModel, DatasetModel.name)
+            .outerjoin(DatasetModel, DatasetModel.id == DecisionModel.dataset_id)
+            .filter(DecisionModel.user_id == user_id)
+            .order_by(DecisionModel.created_at.desc(), DecisionModel.id.desc())
+            .limit(limit)
+            .all()
+        )
+        out: List[Dict[str, Any]] = []
+        for d, dataset_name in rows:
+            run = (
+                self.db.query(RunModel.overall_status)
+                .filter(RunModel.decision_id == d.id)
+                .order_by(RunModel.created_at.desc())
+                .first()
+            )
+            spec = d.spec or {}
+            out.append(
+                {
+                    "id": d.id,
+                    "text": d.text,
+                    "dataset_id": d.dataset_id,
+                    "dataset_name": dataset_name or d.dataset_id,
+                    "status": d.status,
+                    "decision_kind": spec.get("decision_kind"),
+                    "understood": spec.get("understood"),
+                    "run_status": run[0] if run else None,
+                    "created_at": (d.created_at.isoformat() + "Z") if d.created_at else None,  # stored as UTC
+                }
+            )
+        return out
+
+    # ------------------------------------------------------------------
+    # Users
+    # ------------------------------------------------------------------
+
+    def upsert_google_user(self, sub: str, email: str, name: Optional[str], picture: Optional[str]) -> UserModel:
+        """Find the user by Google's stable `sub`, or create them; refresh profile fields on each login."""
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        user = self.db.query(UserModel).filter(UserModel.google_sub == sub).first()
+        if user is None:
+            user = UserModel(id=uuid.uuid4().hex, google_sub=sub, email=email, name=name, picture=picture, created_at=now)
+            self.db.add(user)
+        else:
+            user.email, user.name, user.picture = email, name, picture
+        user.last_login_at = now
+        self.db.commit()
+        self.db.refresh(user)
+        return user
+
+    def get_user(self, user_id: str) -> Optional[UserModel]:
+        return self.db.query(UserModel).filter(UserModel.id == user_id).first()
 
     # ------------------------------------------------------------------
     # Scenario queries

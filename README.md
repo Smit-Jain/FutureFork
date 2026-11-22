@@ -112,7 +112,7 @@ Anything FutureFork had to assume is shown under **About your data** before you 
 |   - DecisionInput: plain-English decision prompt                                |
 |   - ScenarioTree: baseline + fork cards with live solve status                  |
 |   - CashFlowMatrix: month-by-month balances vs. emergency floor                 |
-|   - ComparisonDashboard: 4-fork side-by-side risk & cost comparison             |
+|   - CompareWorkbench: tabs for overview, Crisis Playground and cash flow       |
 |   - ExplanationPanel: AI narrative checked by the Numeric Guard                 |
 +---------------------------------------+-----------------------------------------+
                                         | REST API / JSON
@@ -147,7 +147,8 @@ Anything FutureFork had to assume is shown under **About your data** before you 
 
 | Step | Endpoint | What happens |
 |---|---|---|
-| 0 | `GET /datasets` | List datasets, including the three bundled samples seeded on startup |
+| – | `POST /auth/google` · `GET /auth/me` · `POST /auth/logout` | Google Sign-In. Every other endpoint (except `/health`, `/ping`, `/auth/config`) needs the session cookie |
+| 0 | `GET /datasets` | List datasets: the three shared samples plus your own uploads |
 | 1 | `POST /datasets/inspect` | Upload a CSV/TSV/Excel file (up to 10 MB). Returns the proposed column mapping, a 5-row preview, warnings and an `upload_id` (15-minute TTL) |
 | 2 | `POST /datasets/commit` | Confirm or edit the mapping. Compiles the 12-month **Node 0** baseline |
 | 3 | `POST /decisions` | Parse the plain-English decision into a structured spec |
@@ -155,8 +156,9 @@ Anything FutureFork had to assume is shown under **About your data** before you 
 | 5 | `POST /decisions/{id}/run` | Dispatch CP-SAT and Monte Carlo evaluation in the background |
 | 6 | `GET /runs/{run_id}` | Poll progress and per-fork status |
 | 7 | `GET /decisions/{id}/compare` | Side-by-side results plus the guarded AI explanation |
-| 8 | `POST /decisions/{id}/stress` | Crisis Playground: re-test every fork under late income, a surprise bill, higher spending or a different floor (a few ms) |
+| 8 | `POST /decisions/{id}/stress` | Crisis Playground: re-test every fork under late income, a surprise bill, higher spending, an income drop or a different floor (a few ms) |
 | 9 | `POST /scenarios/{id}/branch` | Branch a child fork off any scenario |
+| 10 | `GET /me/decisions` | Your saved decisions, newest first (the workspace's **History** panel) |
 
 Interactive API docs: [http://localhost:8000/docs](http://localhost:8000/docs)
 
@@ -196,7 +198,15 @@ cp .env.example .env                # optional: add OPENAI_API_KEY or GROQ_API_K
 python backend/main.py              # http://localhost:8000
 ```
 
-On first start the backend creates its SQLite database and seeds the three sample datasets.
+On first start the backend applies the database migrations (Alembic) and seeds the three sample datasets. It uses SQLite by default; to use PostgreSQL, create a database and set `DATABASE_URL=postgresql+psycopg2://user:password@localhost:5432/dbname` in `.env`.
+
+#### Sign-in
+
+FutureFork accounts use Google Sign-In; decisions and uploads are saved per user and appear under **History**.
+
+1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials), create an OAuth client ID of type **Web application** and add `http://localhost:5173` under *Authorized JavaScript origins* (no redirect URI or secret needed).
+2. Put the client ID in `.env` as `GOOGLE_CLIENT_ID`, and set a random `SESSION_SECRET`.
+3. For local work without Google, `AUTH_DEV_LOGIN=1` adds **Continue as local developer** to the sign-in page (never available in production).
 
 No API key? No problem. Without `OPENAI_API_KEY` or `GROQ_API_KEY`, every AI agent falls back to deterministic regex parsing and template explanations.
 
@@ -206,8 +216,10 @@ No API key? No problem. Without `OPENAI_API_KEY` or `GROQ_API_KEY`, every AI age
 cd frontend
 cp .env.example .env
 pnpm install                        # or: npm install
-pnpm dev                            # http://localhost:5173
+pnpm dev                            # http://localhost:5173 (landing) · /app (workspace)
 ```
+
+The site has two routes: `/` is the landing page (a three.js robot, loaded lazily, with a flat SVG fallback and a static pose for reduced motion) and `/app` is the workspace. Links like `/app?demo=sample_personal&prompt=…` load a sample dataset, run the prompt through the real pipeline and start a guided tour. When hosting the built `dist/` on a static host, rewrite unknown paths to `index.html` so `/app` deep links work.
 
 The frontend talks to the live backend by default. For UI-only work without a backend, set `VITE_USE_MOCKS=true`; the header then shows a **Mock data** badge, and every number is a placeholder.
 
@@ -233,7 +245,12 @@ Set these in `.env` at the repo root (see [`.env.example`](.env.example)):
 |---|---|---|
 | `ENVIRONMENT` | `development` | `production` hides exception details in API error responses |
 | `CORS_ORIGINS` | `http://localhost:5173,…` | Comma-separated allowed frontend origins (`*` allows any origin, without credentials) |
-| `DATABASE_URL` | `sqlite:///./futurefork.db` | SQLite locally, or a Postgres/Supabase connection string |
+| `DATABASE_URL` | `sqlite:///./futurefork.db` | SQLite locally, or a Postgres/Supabase connection string (`postgresql+psycopg2://…`) |
+| `GOOGLE_CLIENT_ID` | *(empty)* | Google Sign-In OAuth client ID (required in production) |
+| `SESSION_SECRET` | *(random in dev)* | Signs the session cookie (required in production; a random dev value signs everyone out on restart) |
+| `SESSION_TTL_DAYS` | `7` | Session length |
+| `COOKIE_SAMESITE` / `COOKIE_SECURE` | `lax` / on in production | Use `none` + `1` when the frontend and API are on different domains |
+| `AUTH_DEV_LOGIN` | `0` | `1` enables a development sign-in without Google (ignored in production) |
 | `OPENAI_API_KEY` / `GROQ_API_KEY` | *(empty)* | Optional LLM for mapping, parsing and explanations |
 | `FUTUREFORK_OFFLINE` | *(unset)* | `1` forces the offline regex/template agents even when a key is set |
 | `NUM_SIMULATION_RUNS` | `300` | Monte Carlo runs per fork |
@@ -271,7 +288,7 @@ cd frontend && pnpm run build
 3. **Scenario agent** ([`ai/agents/scenario.py`](ai/agents/scenario.py)): add a `(decision_kind, fork)` entry to `_FORK_METADATA`.
 4. **Parser** ([`ai/agents/parser.py`](ai/agents/parser.py)): teach it the keywords that indicate the new financing preference.
 5. **Explainer** ([`ai/agents/explainer.py`](ai/agents/explainer.py)): make sure the fork's metrics are added to the Numeric Guard's allowed facts.
-6. **Contracts & UI**: add the branch to `BranchType` in [`contracts/schemas.py`](contracts/schemas.py) and both `types.ts` copies, and give it a colour and label in `ScenarioTree.tsx`, `ComparisonDashboard.tsx` and `ExplanationPanel.tsx`.
+6. **Contracts & UI**: add the branch to `BranchType` in [`contracts/schemas.py`](contracts/schemas.py) and both `types.ts` copies, and give it a colour and label in `frontend/src/theme/forks.ts` (used by every component).
 7. **Tests**: add cases to `engine/tests/test_financial_solver.py`, `backend/tests/test_api.py` and `ai/evals/test_prompts.py`.
 
 ---
@@ -309,9 +326,13 @@ futurefork/
 │   ├── simulator.py             # Vectorized NumPy Monte Carlo
 │   ├── metrics.py               # Deterministic risk metrics
 │   └── tests/                   # Engine tests
-├── frontend/                    # React 18 + TypeScript + Tailwind
+├── frontend/                    # React 18 + TypeScript + Tailwind + three.js
 │   └── src/
-│       ├── components/          # UploadIngestor, ScenarioTree, CashFlowMatrix, ...
+│       ├── pages/               # Landing (/) and Workspace (/app)
+│       ├── landing/             # Landing sections, copy, and the three.js robot (robot/)
+│       ├── components/          # UploadIngestor, ScenarioTree, CashFlowMatrix, ... + fx/ (tilt, reveal)
+│       ├── demo/GuidedTour.tsx  # Coach-mark tour after a guided demo run
+│       ├── theme/forks.ts       # Fork colours, labels, ₹ formatting, chart theme
 │       ├── api/client.ts        # REST client
 │       ├── contracts/types.ts   # Frontend type contracts
 │       └── mocks/fixtures.ts    # Offline mock data

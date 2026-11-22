@@ -1,11 +1,10 @@
 import React, { useState } from 'react';
 import { FinancialScenarioResult, CashFlowMatrixData } from '../contracts/types';
-import { Lock, Unlock, Eye, GitCompare } from 'lucide-react';
+import { Lock, Unlock, GitCompare } from 'lucide-react';
 
 interface CashFlowMatrixProps {
   result: FinancialScenarioResult | null;
   baselineResult: FinancialScenarioResult | null;
-  showDiff: boolean;
 }
 
 interface TooltipData {
@@ -17,216 +16,235 @@ interface TooltipData {
   delta?: number;
 }
 
-function getSpendColor(value: number, maxValue: number, isFixed: boolean): string {
-  if (value === 0) return 'bg-white/3 text-slate-600';
-  const intensity = value / maxValue;
-  if (isFixed) {
-    if (intensity > 0.8) return 'bg-cyan-500/20 text-cyan-300';
-    if (intensity > 0.5) return 'bg-cyan-500/12 text-cyan-400';
-    return 'bg-cyan-500/6 text-cyan-500';
-  }
-  if (intensity > 0.85) return 'bg-rose-500/30 text-rose-300';
-  if (intensity > 0.65) return 'bg-rose-500/18 text-rose-400';
-  if (intensity > 0.4)  return 'bg-amber-500/15 text-amber-400';
-  return 'bg-white/5 text-slate-400';
+/** Heat shading on paper: ink-tinted for fixed costs, warm brand tint for flexible ones. */
+function cellStyle(value: number, maxValue: number, isFixed: boolean): React.CSSProperties {
+  if (value === 0) return { color: 'rgba(20,20,20,.3)' };
+  const k = Math.min(1, value / maxValue);
+  return isFixed
+    ? { background: `rgba(15,107,143,${0.04 + k * 0.16})` }
+    : { background: `rgba(255,90,95,${0.04 + k * 0.22})` };
 }
 
-function getDeltaColor(delta: number): string {
-  if (delta > 0) return 'text-rose-400';
-  if (delta < 0) return 'text-emerald-400';
-  return 'text-slate-500';
-}
+const deltaColor = (d: number) => (d > 0 ? '#d6345f' : d < 0 ? '#2f7d4f' : 'rgba(20,20,20,.5)');
 
 const fmtK = (v: number) => {
   if (v === 0) return '—';
-  if (Math.abs(v) >= 100000) return `${(v / 100000).toFixed(1)}L`;
-  if (Math.abs(v) >= 1000) return `${(v / 1000).toFixed(0)}K`;
-  return v.toString();
+  const sign = v < 0 ? '-' : '';
+  const a = Math.abs(v);
+  if (a >= 100000) return `${sign}${(a / 100000).toFixed(1)}L`;
+  if (a >= 1000) return `${sign}${(a / 1000).toFixed(0)}K`;
+  return `${sign}${Math.round(a)}`;
 };
 
-export const CashFlowMatrix: React.FC<CashFlowMatrixProps> = ({ result, baselineResult, showDiff }) => {
+export const CashFlowMatrix: React.FC<CashFlowMatrixProps> = ({ result, baselineResult }) => {
   const [tooltip, setTooltip] = useState<TooltipData | null>(null);
   const [highlightedMonth, setHighlightedMonth] = useState<number | null>(null);
+  const [diffMode, setDiffMode] = useState(true);
 
   if (!result) {
     return (
-      <div className="glass-card p-10 flex items-center justify-center text-slate-500 text-sm">
-        Select a scenario to view the cash flow matrix
+      <div className="paper-card brackets p-10 flex items-center justify-center">
+        <span className="label">Select a fork above to open its cash-flow matrix</span>
       </div>
     );
   }
 
   const cashFlow = result.cash_flow;
   const baselineCashFlow: CashFlowMatrixData | null = baselineResult?.cash_flow ?? null;
+  const canDiff = !!baselineCashFlow && result.branch_type !== 'baseline';
+  const showDiff = diffMode && canDiff;
 
-  // Max per category for colour scaling
   const maxValues = cashFlow.categories.reduce<Record<string, number>>((acc, cat) => {
     acc[cat.name] = Math.max(...cat.values, 1);
     return acc;
   }, {});
 
-  const isChanged = (catName: string, monthIdx: number): boolean => {
-    if (!baselineCashFlow) return false;
-    const baseCat = baselineCashFlow.categories.find(c => c.name === catName);
-    const curCat = cashFlow.categories.find(c => c.name === catName);
-    if (!baseCat || !curCat) return false;
-    return baseCat.values[monthIdx] !== curCat.values[monthIdx];
-  };
-
   const getDelta = (catName: string, monthIdx: number): number => {
     if (!baselineCashFlow) return 0;
-    const baseCat = baselineCashFlow.categories.find(c => c.name === catName);
-    const curCat = cashFlow.categories.find(c => c.name === catName);
-    if (!baseCat || !curCat) return 0;
+    const baseCat = baselineCashFlow.categories.find((c) => c.name === catName);
+    const curCat = cashFlow.categories.find((c) => c.name === catName);
+    if (!baseCat || !curCat) return curCat ? curCat.values[monthIdx] : 0;
     return curCat.values[monthIdx] - baseCat.values[monthIdx];
   };
 
-  const fixedCats = cashFlow.categories.filter(c => c.type === 'fixed');
-  const flexCats  = cashFlow.categories.filter(c => c.type === 'flexible');
+  const fixedCats = cashFlow.categories.filter((c) => c.type === 'fixed');
+  const flexCats = cashFlow.categories.filter((c) => c.type === 'flexible');
+  const hasPurchase = cashFlow.purchase_cash_out.some((v) => v > 0);
 
-  const renderCell = (cat: CashFlowMatrixData['categories'][0], monthIdx: number, key: string) => {
+  const cellHandlers = (category: string, monthIdx: number, value: number, delta: number) => ({
+    onMouseEnter: (e: React.MouseEvent) => {
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      setTooltip({ x: rect.left, y: rect.top - 64, category, month: cashFlow.months[monthIdx], value, delta });
+      setHighlightedMonth(monthIdx);
+    },
+    onMouseLeave: () => {
+      setTooltip(null);
+      setHighlightedMonth(null);
+    },
+  });
+
+  const renderCell = (cat: CashFlowMatrixData['categories'][0], monthIdx: number) => {
     const val = cat.values[monthIdx];
-    const changed = showDiff && isChanged(cat.name, monthIdx);
     const delta = showDiff ? getDelta(cat.name, monthIdx) : 0;
-    const isHighlight = highlightedMonth === monthIdx;
+    const changed = showDiff && delta !== 0;
     const dimmed = showDiff && !changed;
-
-    const colorClass = getSpendColor(val, maxValues[cat.name], cat.type === 'fixed');
-
     return (
       <td
-        key={key}
-        className={`relative text-center text-[11px] font-mono tabular-nums py-1.5 px-1 cursor-pointer
-                    transition-all duration-150 border-r border-white/5
-                    ${colorClass}
-                    ${isHighlight ? 'ring-1 ring-inset ring-cyan-500/50' : ''}
+        key={`${cat.name}-${monthIdx}`}
+        className={`relative text-center text-[11px] font-mono tabular-nums py-2 px-1 cursor-default border-r border-ink-line transition-opacity duration-150
+                    ${highlightedMonth === monthIdx ? 'outline outline-1 -outline-offset-1 outline-ink/40' : ''}
                     ${dimmed ? 'opacity-25' : ''}
-                    ${changed ? 'ring-1 ring-inset ring-amber-500/60' : ''}
-                    hover:opacity-100 hover:ring-1 hover:ring-inset hover:ring-white/30`}
-        onMouseEnter={(e) => {
-          const rect = (e.target as HTMLElement).getBoundingClientRect();
-          setTooltip({ x: rect.left, y: rect.top - 60, category: cat.name, month: cashFlow.months[monthIdx], value: val, delta });
-          setHighlightedMonth(monthIdx);
-        }}
-        onMouseLeave={() => { setTooltip(null); setHighlightedMonth(null); }}
+                    ${changed ? 'outline outline-1 -outline-offset-1 outline-brand-coral' : ''}`}
+        style={changed ? { background: delta > 0 ? 'rgba(214,52,95,.16)' : 'rgba(47,125,79,.16)' } : cellStyle(val, maxValues[cat.name], cat.type === 'fixed')}
+        {...cellHandlers(cat.name, monthIdx, val, delta)}
       >
         {fmtK(val)}
-        {changed && delta !== 0 && (
-          <span className={`absolute top-0.5 right-0.5 text-[8px] font-bold leading-none ${getDeltaColor(delta)}`}>
-            {delta > 0 ? '+' : ''}{fmtK(delta)}
+        {changed && (
+          <span className="absolute top-0.5 right-0.5 text-[8px] leading-none" style={{ color: deltaColor(delta) }}>
+            {delta > 0 ? '+' : ''}
+            {fmtK(delta)}
           </span>
         )}
       </td>
     );
   };
 
-  const renderCategoryGroup = (cats: CashFlowMatrixData['categories'], isFixed: boolean) => (
-    <>
-      {cats.map((cat) => (
-        <tr key={cat.name} className="border-b border-white/5 hover:bg-white/3 group">
-          <td className="py-2 pl-4 pr-3 text-xs font-medium text-slate-300 whitespace-nowrap sticky left-0 bg-[#0F1623] z-10 border-r border-white/8">
-            <div className="flex items-center gap-1.5">
-              {isFixed ? (
-                <Lock className="w-3 h-3 text-slate-500 shrink-0" />
-              ) : (
-                <Unlock className="w-3 h-3 text-slate-600 shrink-0" />
-              )}
-              {cat.name}
-            </div>
-          </td>
-          {cashFlow.months.map((_, mIdx) => renderCell(cat, mIdx, `${cat.name}-${mIdx}`))}
-        </tr>
-      ))}
-    </>
+  const groupHeader = (label: string) => (
+    <tr className="border-b border-ink-line">
+      <td colSpan={13} className="py-1.5 pl-4 label text-[10px] bg-paper">
+        {label}
+      </td>
+    </tr>
   );
 
+  const renderCategoryGroup = (cats: CashFlowMatrixData['categories'], isFixed: boolean) =>
+    cats.map((cat) => (
+      <tr key={cat.name} className="border-b border-ink-line">
+        <th scope="row" className="py-2 pl-4 pr-3 text-xs font-normal text-left whitespace-nowrap sticky left-0 bg-paper-2 z-10 border-r border-ink-line">
+          <span className="flex items-center gap-1.5">
+            {isFixed ? <Lock className="w-3 h-3 text-ink-dim shrink-0" /> : <Unlock className="w-3 h-3 text-ink-dim shrink-0" />}
+            {cat.name}
+          </span>
+        </th>
+        {cashFlow.months.map((_, mIdx) => renderCell(cat, mIdx))}
+      </tr>
+    ));
+
+  const simpleRow = (label: string, values: number[], color?: string, baseValues?: number[]) => (
+    <tr className="border-b border-ink-line">
+      <th scope="row" className="py-2 pl-4 pr-3 text-xs font-medium text-left whitespace-nowrap sticky left-0 bg-paper-2 z-10 border-r border-ink-line">
+        {label}
+      </th>
+      {values.map((v, i) => {
+        const delta = showDiff ? v - (baseValues?.[i] ?? 0) : 0;
+        const changed = showDiff && Math.abs(delta) >= 1;
+        return (
+          <td
+            key={i}
+            className={`text-center text-[11px] font-mono tabular-nums py-2 px-1 border-r border-ink-line transition-opacity
+                        ${showDiff && !changed ? 'opacity-25' : ''} ${changed ? 'outline outline-1 -outline-offset-1 outline-brand-coral' : ''}`}
+            style={{ color: v ? color : 'rgba(20,20,20,.3)', background: changed ? 'rgba(255,90,95,.12)' : undefined }}
+            {...cellHandlers(label, i, v, delta)}
+          >
+            {fmtK(v)}
+          </td>
+        );
+      })}
+    </tr>
+  );
+
+  // How many cells this fork changes (for the diff summary)
+  const changedCells = canDiff
+    ? cashFlow.categories.reduce((n, c, ci) => n + c.values.filter((_, mi) => getDelta(cashFlow.categories[ci].name, mi) !== 0).length, 0) +
+      cashFlow.inflows.filter((v, i) => Math.abs(v - (baselineCashFlow?.inflows[i] ?? 0)) >= 1).length +
+      cashFlow.purchase_cash_out.filter((v, i) => Math.abs(v - (baselineCashFlow?.purchase_cash_out[i] ?? 0)) >= 1).length
+    : 0;
+
   return (
-    <div className="glass-card overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-white/8">
-        <div className="flex items-center gap-2">
-          <Eye className="w-4 h-4 text-slate-400" />
-          <span className="text-sm font-bold text-slate-200">12-Month Cash Flow Matrix</span>
-          <span className="text-xs text-slate-500 font-mono ml-1">8 categories × 12 months</span>
+    <div className="paper-card overflow-hidden" data-tour="cashflow">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-ink-line">
+        <div className="flex items-baseline gap-3">
+          <span className="text-lg tracking-tight">{result.name || 'Cash flow'}</span>
+          <span className="label">{cashFlow.categories.length} categories × {cashFlow.months.length} months</span>
         </div>
-        {showDiff && (
-          <div className="flex items-center gap-1.5 text-xs text-amber-400 border border-amber-500/30 rounded-lg px-2.5 py-1 bg-amber-500/10">
-            <GitCompare className="w-3.5 h-3.5" />
-            Diff vs Baseline
+        <div className="flex items-center gap-3">
+          {showDiff && <span className="label text-[10px]">{changedCells} cell{changedCells === 1 ? '' : 's'} changed vs baseline</span>}
+          <div className="inline-flex border border-ink" role="radiogroup" aria-label="Cash flow view">
+            {([['abs', 'Absolute values'], ['diff', 'Diff vs baseline']] as const).map(([m, t], i) => (
+              <button
+                key={m}
+                type="button"
+                role="radio"
+                aria-checked={(m === 'diff') === showDiff}
+                disabled={m === 'diff' && !canDiff}
+                title={m === 'diff' && !canDiff ? 'Select a fork other than the baseline to compare' : undefined}
+                onClick={() => setDiffMode(m === 'diff')}
+                className={`h-7 px-2.5 flex items-center gap-1.5 font-mono text-[10.5px] uppercase tracking-[0.05em] transition-colors ${i ? 'border-l border-ink' : ''}
+                            ${(m === 'diff') === showDiff ? 'bg-ink text-paper' : m === 'diff' && !canDiff ? 'text-ink/25 cursor-not-allowed' : 'hover:bg-paper'}`}
+              >
+                {m === 'diff' && <GitCompare className="w-3 h-3" />}
+                {t}
+              </button>
+            ))}
           </div>
-        )}
+        </div>
       </div>
 
-      {/* Legend */}
-      <div className="flex gap-3 px-4 py-2 text-[10px] border-b border-white/5 bg-white/2">
-        <span className="flex items-center gap-1 text-slate-500"><Lock className="w-2.5 h-2.5 text-slate-600" /> Fixed</span>
-        <span className="flex items-center gap-1 text-slate-500"><Unlock className="w-2.5 h-2.5 text-slate-600" /> Flexible</span>
-        <span className="flex items-center gap-1 text-rose-500">■ High spend</span>
-        <span className="flex items-center gap-1 text-amber-500">■ Mid spend</span>
-        <span className="flex items-center gap-1 text-slate-600">■ Low spend</span>
-        {showDiff && <span className="flex items-center gap-1 text-amber-400">◇ Changed</span>}
+      <div className="flex flex-wrap gap-x-4 gap-y-1 px-4 py-2 border-b border-ink-line label text-[10px]">
+        <span className="flex items-center gap-1"><Lock className="w-2.5 h-2.5" /> Fixed</span>
+        <span className="flex items-center gap-1"><Unlock className="w-2.5 h-2.5" /> Flexible</span>
+        <span className="flex items-center gap-1"><i className="inline-block w-2.5 h-2.5" style={{ background: 'rgba(15,107,143,.2)' }} /> Fixed spend</span>
+        <span className="flex items-center gap-1"><i className="inline-block w-2.5 h-2.5" style={{ background: 'rgba(255,90,95,.26)' }} /> Flexible spend</span>
+        {showDiff && <span className="flex items-center gap-1"><i className="inline-block w-2.5 h-2.5 border border-brand-coral" /> Changed</span>}
       </div>
 
       {cashFlow.projected?.some(Boolean) && (
-        <p className="px-4 pt-2 text-[11px] text-amber-300/80">
-          <span className="text-amber-400">*</span> Projected month: your file didn't cover it, so it uses your average
-          monthly income and spending.
+        <p className="px-4 pt-2 text-[12px] text-ink-dim">
+          <span className="text-brand-coral">*</span> Projected month: your file didn't cover it, so it uses your average monthly
+          income and spending.
         </p>
       )}
 
-      {/* Table */}
       <div className="overflow-x-auto">
-        <table className="w-full border-collapse min-w-[700px]">
+        <table className="w-full border-collapse min-w-[760px]">
           <thead>
-            <tr className="border-b border-white/10 bg-white/3">
-              <th className="py-2 pl-4 pr-3 text-left text-xs font-semibold text-slate-500 sticky left-0 bg-[#0F1623] z-10 w-28 border-r border-white/8">
+            <tr className="border-b border-ink">
+              <th className="py-2 pl-4 pr-3 text-left label text-[10px] sticky left-0 bg-paper-2 z-10 w-32 border-r border-ink-line">
                 Category
               </th>
               {cashFlow.months.map((m, i) => (
                 <th
                   key={m}
-                  className={`text-center text-[10px] font-semibold py-2 px-1 text-slate-500 cursor-pointer
-                              transition-colors hover:text-slate-200 border-r border-white/5
-                              ${highlightedMonth === i ? 'text-cyan-400' : ''}`}
+                  className={`text-center label text-[10px] py-2 px-1 cursor-pointer border-r border-ink-line transition-colors ${highlightedMonth === i ? 'text-ink' : ''}`}
                   onClick={() => setHighlightedMonth(highlightedMonth === i ? null : i)}
                   title={cashFlow.projected?.[i] ? 'Projected from your average monthly income and spending' : undefined}
                 >
                   {m}
-                  {cashFlow.projected?.[i] && <span className="text-amber-400">*</span>}
+                  {cashFlow.projected?.[i] && <span className="text-brand-coral">*</span>}
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {/* Fixed section header */}
-            <tr className="bg-cyan-500/5 border-b border-white/5">
-              <td colSpan={13} className="py-1 pl-4 text-[10px] font-bold uppercase tracking-widest text-cyan-500/70">
-                Fixed Costs
-              </td>
-            </tr>
+            {simpleRow('Money in', cashFlow.inflows, '#2f7d4f', baselineCashFlow?.inflows)}
+            {hasPurchase && simpleRow('Decision cash-out', cashFlow.purchase_cash_out, '#d6345f', baselineCashFlow?.purchase_cash_out)}
+            {groupHeader('Fixed costs')}
             {renderCategoryGroup(fixedCats, true)}
-
-            {/* Flexible section header */}
-            <tr className="bg-amber-500/5 border-b border-white/5">
-              <td colSpan={13} className="py-1 pl-4 text-[10px] font-bold uppercase tracking-widest text-amber-500/70">
-                Flexible Costs
-              </td>
-            </tr>
+            {groupHeader('Flexible costs')}
             {renderCategoryGroup(flexCats, false)}
           </tbody>
         </table>
       </div>
 
-      {/* Tooltip */}
       {tooltip && (
         <div
-          className="fixed z-50 pointer-events-none bg-[#0F1623] border border-white/20 rounded-xl px-3 py-2 shadow-glass text-xs"
+          className="fixed z-50 pointer-events-none bg-paper-2 border border-ink px-3 py-2 shadow-lift text-xs"
           style={{ left: tooltip.x, top: tooltip.y }}
         >
-          <div className="font-bold text-slate-200">{tooltip.category} · {tooltip.month}</div>
-          <div className="font-mono tabular-nums text-emerald-400">₹{tooltip.value.toLocaleString('en-IN')}</div>
+          <div className="label text-ink">{tooltip.category} · {tooltip.month}</div>
+          <div className="font-mono tabular-nums text-sm">₹{tooltip.value.toLocaleString('en-IN')}</div>
           {showDiff && tooltip.delta !== undefined && tooltip.delta !== 0 && (
-            <div className={`font-mono tabular-nums text-xs ${getDeltaColor(tooltip.delta)}`}>
+            <div className="font-mono tabular-nums" style={{ color: deltaColor(tooltip.delta) }}>
               Δ {tooltip.delta > 0 ? '+' : ''}₹{tooltip.delta.toLocaleString('en-IN')} vs baseline
             </div>
           )}

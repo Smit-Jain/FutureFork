@@ -20,9 +20,9 @@ export const MetricPill: React.FC<MetricPillProps> = ({
   className,
 }) => {
   const trendStyles = {
-    good: 'bg-emerald-50 text-emerald-800 border-emerald-200/80',
-    bad: 'bg-rose-50 text-rose-800 border-rose-200/80',
-    neutral: 'bg-slate-50 text-slate-700 border-slate-200',
+    good: 'bg-good/5 text-good border-good/50',
+    bad: 'bg-bad/5 text-bad border-bad/50',
+    neutral: 'bg-paper-2 text-ink border-ink-faint',
   };
 
   const sizeStyles = {
@@ -34,14 +34,14 @@ export const MetricPill: React.FC<MetricPillProps> = ({
     <div
       className={twMerge(
         clsx(
-          'inline-flex items-center gap-1 rounded-md border font-medium font-mono tracking-tight',
+          'inline-flex items-center gap-1 border font-mono tabular-nums',
           sizeStyles[size],
           trendStyles[trend],
           className
         )
       )}
     >
-      <span className="text-slate-500 font-sans text-[10px] uppercase font-semibold">
+      <span className="text-ink-dim text-[10px] uppercase tracking-[0.05em]">
         {label}:
       </span>
       <span className="font-bold">

@@ -21,29 +21,22 @@ export const Button: React.FC<ButtonProps> = ({
   ...props
 }) => {
   const baseStyles =
-    'inline-flex items-center justify-center font-semibold rounded-lg transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] select-none';
+    'inline-flex items-center justify-center font-mono uppercase tracking-[0.06em] transition-colors duration-200 disabled:opacity-40 disabled:cursor-not-allowed select-none';
 
   const sizeStyles = {
-    sm: 'text-xs px-3 py-1.5 gap-1.5 h-8',
-    md: 'text-sm px-4 py-2 gap-2 h-10',
-    lg: 'text-base px-5 py-2.5 gap-2.5 h-12',
+    sm: 'text-[10px] px-3 gap-1.5 h-8',
+    md: 'text-[11px] px-4 gap-2 h-10',
+    lg: 'text-xs px-6 gap-2.5 h-12',
   };
 
   const variantStyles = {
-    primary:
-      'bg-brand-600 hover:bg-brand-700 text-white shadow-sm focus:ring-brand-500 hover:shadow',
-    secondary:
-      'bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 focus:ring-slate-400',
-    outline:
-      'bg-transparent border border-slate-300 hover:bg-slate-50 text-slate-700 focus:ring-slate-400',
-    ghost:
-      'bg-transparent hover:bg-slate-100 text-slate-600 hover:text-slate-900 focus:ring-slate-400',
-    danger:
-      'bg-rose-600 hover:bg-rose-700 text-white shadow-sm focus:ring-rose-500',
-    success:
-      'bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm focus:ring-emerald-500',
-    purple:
-      'bg-purple-600 hover:bg-purple-700 text-white shadow-sm focus:ring-purple-500',
+    primary: 'bg-ink text-paper hover:bg-ink-2',
+    secondary: 'bg-paper-2 text-ink border border-ink-faint hover:border-ink',
+    outline: 'bg-transparent text-ink border border-ink hover:bg-ink hover:text-paper',
+    ghost: 'bg-transparent text-ink-dim hover:text-ink',
+    danger: 'bg-bad text-paper hover:opacity-90',
+    success: 'bg-good text-paper hover:opacity-90',
+    purple: 'bg-fork-phased text-paper hover:opacity-90',
   };
 
   return (

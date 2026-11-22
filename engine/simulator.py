@@ -51,6 +51,7 @@ def run_financial_monte_carlo(
     - inflow_delay_days:   every month's inflow arrives this many days late (30 days = one month)
     - surprise_outflow:    a one-off unexpected bill in the first month
     - spend_increase_pct:  all regular spending is this much higher
+    - income_change_pct:   every month's inflow changes by this % (e.g. -15 for a 15% income drop)
     - emergency_floor:     score against this floor instead of the plan's
 
     The plan itself is not re-optimised: stress shows how the solved plan holds up.
@@ -106,6 +107,9 @@ def run_financial_monte_carlo(
     delay_days = max(0.0, float(stress.get("inflow_delay_days") or 0.0))
     surprise = max(0.0, float(stress.get("surprise_outflow") or 0.0))
     spend_factor = 1.0 + max(-90.0, float(stress.get("spend_increase_pct") or 0.0)) / 100.0
+    income_factor = 1.0 + max(-100.0, float(stress.get("income_change_pct") or 0.0)) / 100.0
+    if income_factor != 1.0:
+        planned_inflows = planned_inflows * income_factor
     if stress.get("emergency_floor") is not None:
         floor = max(0.0, float(stress["emergency_floor"]))
     if delay_days > 0:
@@ -303,6 +307,7 @@ def run_financial_monte_carlo(
             "inflow_delay_days": delay_days,
             "surprise_outflow": surprise,
             "spend_increase_pct": round((spend_factor - 1.0) * 100.0, 2),
+            "income_change_pct": round((income_factor - 1.0) * 100.0, 2),
             "emergency_floor": floor,
         },
         "per_metric": {

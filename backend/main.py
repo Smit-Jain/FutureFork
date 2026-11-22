@@ -20,6 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from backend import settings
+from backend.api.auth_routes import router as auth_router
 from backend.api.routes import router
 from backend.db.repository import init_db
 
@@ -33,6 +34,10 @@ logger = logging.getLogger("futurefork")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: create tables and seed the bundled sample datasets
+    settings.validate_auth_settings()
+    if not settings.GOOGLE_CLIENT_ID:
+        logger.warning("GOOGLE_CLIENT_ID is not set: Google Sign-In is disabled%s.",
+                       " (dev login is enabled)" if settings.AUTH_DEV_LOGIN else "")
     logger.info("Initializing FutureFork Database...")
     init_db()
     logger.info("Database initialized with sample datasets.")
@@ -69,7 +74,8 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={"error": "INTERNAL_SERVER_ERROR", "message": message},
     )
 
-# Include API routes
+# Include API routes (auth endpoints are public; everything in `router` requires a session)
+app.include_router(auth_router)
 app.include_router(router)
 
 if __name__ == "__main__":
